@@ -41,10 +41,14 @@ function fbm(x: number, y: number, seed: number): number {
 
 export type ChangeMap = Record<string, Tile>;
 
+export type Layer = "surface" | "under";
+
 export interface WorldSave {
   seed: number;
   difficulty: "easy" | "hard";
   changes: ChangeMap;
+  underChanges?: ChangeMap;
+  layer?: Layer;
   player: { x: number; y: number; hp: number; hunger: number; time: number };
   inv: (({ id: string; n: number }) | null)[];
   hotbarIndex: number;
@@ -54,12 +58,42 @@ export const key = (x: number, y: number) => x + "," + y;
 
 export class World {
   seed: number;
+  layer: Layer;
   changes: ChangeMap;
   private cache = new Map<string, Tile[]>();
 
-  constructor(seed: number, changes: ChangeMap = {}) {
+  constructor(seed: number, changes: ChangeMap = {}, layer: Layer = "surface") {
     this.seed = seed;
     this.changes = changes;
+    this.layer = layer;
+  }
+
+  /** underground dimension: tunnels of cave floor carved through solid stone */
+  private genUnderChunk(cx: number, cy: number): Tile[] {
+    const tiles: Tile[] = new Array(CHUNK * CHUNK);
+    const s = this.seed + 424242;
+    for (let ty = 0; ty < CHUNK; ty++) {
+      for (let tx = 0; tx < CHUNK; tx++) {
+        const wx = cx * CHUNK + tx;
+        const wy = cy * CHUNK + ty;
+        const n = fbm(wx / 13, wy / 13, s);
+        const n2 = fbm(wx / 6 + 50, wy / 6 + 50, s + 77);
+        const open = Math.abs(n - 0.5) < 0.13 || n2 > 0.68;
+        let t: TileType = open ? "cave" : "stone";
+        let ore: Ore | undefined;
+        let obj: ObjKind | undefined;
+        if (t === "stone") {
+          const o = hash2(wx, wy, s + 999);
+          const depth = fbm(wx / 30 + 900, wy / 30 + 900, s + 31);
+          if (depth > 0.6 && o > 0.955) ore = "diamond";
+          else if (o > 0.87) ore = "iron";
+        } else if (hash2(wx, wy, s + 1234) > 0.988) {
+          obj = "block_stone";
+        }
+        tiles[ty * CHUNK + tx] = { t, ore, obj };
+      }
+    }
+    return tiles;
   }
 
   private genChunk(cx: number, cy: number): Tile[] {
