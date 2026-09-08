@@ -5,6 +5,8 @@ import { defineConfig } from "vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
+  // Relative asset URLs so the build also runs from a subfolder (itch.io zip).
+  base: "./",
   server: {
     host: "::",
     port: 8080,
