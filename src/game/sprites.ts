@@ -163,6 +163,20 @@ export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: n
       px(c, x + u, baseY - S * 1.2, 6 * u, S * 1.2, kind === "door_open" ? "#6b4a22" : "#a3762f");
       break;
     }
+    case "cave_entrance":
+    case "cave_exit": {
+      px(c, x, baseY - S, S, S, "#6f6f75");
+      px(c, x + u, baseY - S * 0.9, 6 * u, S * 0.8, "#14141a");
+      if (kind === "cave_exit") {
+        px(c, x + 2 * u, baseY - S * 0.85, 4 * u, u * 0.6, "#c9a35a");
+        px(c, x + 2 * u, baseY - S * 0.5, 4 * u, u * 0.6, "#c9a35a");
+        px(c, x + 2 * u, baseY - S * 0.2, 4 * u, u * 0.6, "#c9a35a");
+      } else {
+        px(c, x + u, baseY - S * 0.35, 6 * u, u * 0.8, "#3a3a44");
+        px(c, x + 2 * u, baseY - S * 0.6, 4 * u, u * 0.8, "#2a2a32");
+      }
+      break;
+    }
     case "crop0":
     case "crop1":
     case "crop2":

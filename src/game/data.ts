@@ -10,6 +10,8 @@ export type ObjKind =
   | "bed2"
   | "door_closed"
   | "door_open"
+  | "cave_entrance"
+  | "cave_exit"
   | "block_dirt"
   | "block_stone"
   | "block_sand"
@@ -58,6 +60,8 @@ export const OBJ_SOLID: Record<ObjKind, boolean> = {
   bed2: false,
   door_closed: true,
   door_open: false,
+  cave_entrance: false,
+  cave_exit: false,
   block_dirt: true,
   block_stone: true,
   block_sand: true,
@@ -79,6 +83,8 @@ export const OBJ_TALL: Record<ObjKind, boolean> = {
   bed2: false,
   door_closed: true,
   door_open: true,
+  cave_entrance: false,
+  cave_exit: false,
   block_dirt: true,
   block_stone: true,
   block_sand: true,
