@@ -114,22 +114,21 @@ export class World {
         else t = m > 0.62 ? "dirt" : "grass";
 
         if (t === "stone") {
-          // caves: enclosed dark hollows carved inside rock areas
           const cv = fbm(wx / 9 + 300, wy / 9 + 300, this.seed + 9001);
-          const deep = cv > 0.62;
-          if (deep) t = "cave";
-          const nearCave = cv > 0.5;
           const o = hash2(wx, wy, this.seed + 777);
-          if (t === "stone" && nearCave) {
-            // ore is mostly in cave walls; diamond only in the deepest parts
-            if (cv > 0.6 && o > 0.968) ore = "diamond";
-            else if (o > 0.86) ore = "iron";
-          } else if (t === "stone" && o > 0.996) {
+          if (cv > 0.5) {
+            if (cv > 0.6 && o > 0.985) ore = "diamond";
+            else if (o > 0.93) ore = "iron";
+          } else if (o > 0.996) {
             ore = "iron";
           }
-          if (t === "stone" && e > 0.76 && hash2(wx, wy, this.seed + 31) > 0.55) obj = "mountain";
+          if (e > 0.76 && hash2(wx, wy, this.seed + 31) > 0.55) obj = "mountain";
         } else if (t === "grass") {
           if (hash2(wx, wy, this.seed + 99) > 0.94) obj = "tree";
+        }
+        // scattered cave entrances on solid ground — walk onto one to go underground
+        if (!obj && t !== "water" && hash2(wx, wy, this.seed + 60613) > (t === "stone" ? 0.985 : 0.9975)) {
+          obj = "cave_entrance";
         }
         tiles[ty * CHUNK + tx] = { t, ore, obj };
       }
@@ -141,7 +140,7 @@ export class World {
     const k = key(cx, cy);
     let c = this.cache.get(k);
     if (!c) {
-      c = this.genChunk(cx, cy);
+      c = this.layer === "under" ? this.genUnderChunk(cx, cy) : this.genChunk(cx, cy);
       this.cache.set(k, c);
       if (this.cache.size > 400) {
         const first = this.cache.keys().next().value;
