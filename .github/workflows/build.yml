@@ -1,33 +1,39 @@
 name: Build Game for Itch
+
 on:
   push:
-    branches: [ main, master ]
-
-# 👇 This fixes the warning by telling GitHub to use Node 24
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24 # 👈 Updated this from 20 to 24
-          cache: 'npm'
+          node-version: 22
 
-      - name: Install Dependencies
-        run: npm install --legacy-peer-deps
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
 
-      - name: Build Project
+      - name: Build project
         run: npm run build
 
-      - name: Upload Zip for Itch.io
+      - name: Package for itch.io
+        run: npm run pack:itch
+
+      - name: Upload playable game folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: itch-game
+          path: dist/client
+
+      - name: Upload itch.io zip
         uses: actions/upload-artifact@v4
         with:
           name: itch-game-zip
-          path: dist/
+          path: dist/blockcraft-2d-itch.zip
