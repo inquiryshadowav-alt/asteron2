@@ -56,11 +56,20 @@ export interface WorldSave {
 
 export const key = (x: number, y: number) => x + "," + y;
 
+/** size of a cave region: at most one cave system per region */
+export const REGION = 28;
+
+interface Anchor {
+  x: number;
+  y: number;
+}
+
 export class World {
   seed: number;
   layer: Layer;
   changes: ChangeMap;
   private cache = new Map<string, Tile[]>();
+  private anchors = new Map<string, Anchor | null>();
 
   constructor(seed: number, changes: ChangeMap = {}, layer: Layer = "surface") {
     this.seed = seed;
@@ -68,7 +77,64 @@ export class World {
     this.layer = layer;
   }
 
-  /** underground dimension: tunnels of cave floor carved through solid stone */
+  /** the single cave-system anchor of a region, or null when the region has no caves */
+  anchor(rx: number, ry: number): Anchor | null {
+    const k = key(rx, ry);
+    const hit = this.anchors.get(k);
+    if (hit !== undefined) return hit;
+    let a: Anchor | null = null;
+    if (hash2(rx, ry, this.seed + 7001) > 0.62) {
+      const ox = 5 + Math.floor(hash2(rx, ry, this.seed + 7002) * (REGION - 10));
+      const oy = 5 + Math.floor(hash2(rx, ry, this.seed + 7003) * (REGION - 10));
+      a = { x: rx * REGION + ox, y: ry * REGION + oy };
+    }
+    this.anchors.set(k, a);
+    return a;
+  }
+
+  /** anchor whose entrance sits exactly on this tile */
+  anchorAt(wx: number, wy: number): boolean {
+    const a = this.anchor(Math.floor(wx / REGION), Math.floor(wy / REGION));
+    return !!a && a.x === wx && a.y === wy;
+  }
+
+  /** distance from a point to a segment */
+  private segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const l = dx * dx + dy * dy || 1;
+    let t = ((px - ax) * dx + (py - ay) * dy) / l;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+  }
+
+  /** true when this underground tile belongs to a cave system (rooms + tunnels) */
+  private caveOpen(wx: number, wy: number): boolean {
+    const wob = 0.72 + fbm(wx / 5, wy / 5, this.seed + 313) * 0.8;
+    const rx0 = Math.floor(wx / REGION);
+    const ry0 = Math.floor(wy / REGION);
+    for (let ry = ry0 - 1; ry <= ry0 + 1; ry++) {
+      for (let rx = rx0 - 1; rx <= rx0 + 1; rx++) {
+        const a = this.anchor(rx, ry);
+        if (!a) continue;
+        // main chamber under the entrance
+        if (Math.hypot(wx - a.x, wy - a.y) < 3.4 * wob + 0.6) return true;
+        const s = this.seed + rx * 131 + ry * 977;
+        for (let i = 0; i < 5; i++) {
+          const ang = hash2(a.x, a.y, s + i * 17) * Math.PI * 2;
+          const dist = 4 + hash2(a.x, a.y, s + i * 29) * 8;
+          const cx = a.x + Math.cos(ang) * dist;
+          const cy = a.y + Math.sin(ang) * dist;
+          const rad = (2.1 + hash2(a.x, a.y, s + i * 41) * 2.2) * wob;
+          if (Math.hypot(wx - cx, wy - cy) < rad) return true;
+          if (this.segDist(wx, wy, a.x, a.y, cx, cy) < 1.1 * wob) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** underground dimension: cave systems carved out of solid stone */
   private genUnderChunk(cx: number, cy: number): Tile[] {
     const tiles: Tile[] = new Array(CHUNK * CHUNK);
     const s = this.seed + 424242;
@@ -76,18 +142,18 @@ export class World {
       for (let tx = 0; tx < CHUNK; tx++) {
         const wx = cx * CHUNK + tx;
         const wy = cy * CHUNK + ty;
-        const n = fbm(wx / 13, wy / 13, s);
-        const n2 = fbm(wx / 6 + 50, wy / 6 + 50, s + 77);
-        const open = Math.abs(n - 0.5) < 0.13 || n2 > 0.68;
-        let t: TileType = open ? "cave" : "stone";
+        const open = this.caveOpen(wx, wy);
+        const t: TileType = open ? "cave" : "stone";
         let ore: Ore | undefined;
         let obj: ObjKind | undefined;
         if (t === "stone") {
           const o = hash2(wx, wy, s + 999);
           const depth = fbm(wx / 30 + 900, wy / 30 + 900, s + 31);
-          if (depth > 0.6 && o > 0.955) ore = "diamond";
-          else if (o > 0.87) ore = "iron";
-        } else if (hash2(wx, wy, s + 1234) > 0.988) {
+          if (depth > 0.6 && o > 0.945) ore = "diamond";
+          else if (o > 0.85) ore = "iron";
+        } else if (this.anchorAt(wx, wy)) {
+          obj = "cave_exit";
+        } else if (hash2(wx, wy, s + 1234) > 0.99) {
           obj = "block_stone";
         }
         tiles[ty * CHUNK + tx] = { t, ore, obj };
@@ -95,6 +161,7 @@ export class World {
     }
     return tiles;
   }
+
 
   private genChunk(cx: number, cy: number): Tile[] {
     const tiles: Tile[] = new Array(CHUNK * CHUNK);
