@@ -193,10 +193,11 @@ export class World {
         } else if (t === "grass") {
           if (hash2(wx, wy, this.seed + 99) > 0.94) obj = "tree";
         }
-        // scattered cave entrances on solid ground — walk onto one to go underground
-        if (!obj && t !== "water" && hash2(wx, wy, this.seed + 60613) > (t === "stone" ? 0.985 : 0.9975)) {
+        // one cave entrance per cave region, sitting right above its cave system
+        if (t !== "water" && this.anchorAt(wx, wy)) {
           obj = "cave_entrance";
         }
+
         tiles[ty * CHUNK + tx] = { t, ore, obj };
       }
     }
