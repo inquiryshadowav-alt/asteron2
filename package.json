@@ -82,5 +82,11 @@
     "vite": "^7.1.7",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz"
+  },
+  "resolutions": {
+    "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz"
   }
 }
