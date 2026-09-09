@@ -85,5 +85,8 @@
   },
   "overrides": {
     "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz"
+  },
+  "resolutions": {
+    "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz"
   }
 }
