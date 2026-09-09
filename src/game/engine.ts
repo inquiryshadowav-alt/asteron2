@@ -12,7 +12,7 @@ import {
   type ToolType,
 } from "./data";
 import { InputMap } from "./input";
-import { World, writeSave, type WorldSave } from "./world";
+import { World, writeSave, type Layer, type WorldSave } from "./world";
 import { drawGround, drawMob, drawObject, drawPlayer, preloadSprites } from "./sprites";
 
 export interface Slot {
