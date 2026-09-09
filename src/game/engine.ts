@@ -134,6 +134,11 @@ export class Game {
 
   onHud: (h: Hud) => void = () => {};
 
+  private surfaceChanges: Record<string, Tile> = {};
+  private underChanges: Record<string, Tile> = {};
+  private lastPortal = "";
+  private surfaceSpot: { x: number; y: number } | null = null;
+
   constructor(canvas: HTMLCanvasElement, opts: { saveId: string; seed: number; difficulty: "easy" | "hard"; save: WorldSave | null }) {
     this.canvas = canvas;
     const ctx = canvas.getContext("2d");
@@ -143,7 +148,10 @@ export class Game {
     preloadSprites();
     this.saveId = opts.saveId;
     this.difficulty = opts.difficulty;
-    this.world = new World(opts.seed, opts.save?.changes ?? {});
+    this.surfaceChanges = opts.save?.changes ?? {};
+    this.underChanges = opts.save?.underChanges ?? {};
+    const layer: Layer = opts.save?.layer ?? "surface";
+    this.world = new World(opts.seed, layer === "under" ? this.underChanges : this.surfaceChanges, layer);
 
     if (opts.save) {
       this.x = opts.save.player.x;
@@ -154,6 +162,7 @@ export class Game {
       this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? { id: s.id, n: s.n } : null));
       while (this.slots.length < INV_SIZE) this.slots.push(null);
       this.hotbar = opts.save.hotbarIndex ?? 0;
+      this.lastPortal = Math.floor(this.x) + "," + Math.floor(this.y);
     } else {
       const spot = this.findSpawn();
       this.x = spot.x;
@@ -189,13 +198,42 @@ export class Game {
     const data: WorldSave = {
       seed: this.world.seed,
       difficulty: this.difficulty,
-      changes: this.world.changes,
+      changes: this.surfaceChanges,
+      underChanges: this.underChanges,
+      layer: this.world.layer,
       player: { x: this.x, y: this.y, hp: this.hp, hunger: this.hunger, time: this.time },
       inv: this.slots.map((s) => (s ? { id: s.id, n: s.n } : null)),
       hotbarIndex: this.hotbar,
     };
     writeSave(this.saveId, data);
   }
+
+  /** walking onto a hole / ladder moves between the surface and the caves */
+  private checkPortal() {
+    const tx = Math.floor(this.x);
+    const ty = Math.floor(this.y);
+    const k = tx + "," + ty;
+    const obj = this.world.get(tx, ty).obj;
+    if (obj !== "cave_entrance" && obj !== "cave_exit") {
+      if (this.lastPortal === k) this.lastPortal = "";
+      return;
+    }
+    if (this.lastPortal === k) return;
+    const down = obj === "cave_entrance";
+    if (down) this.surfaceSpot = { x: this.x, y: this.y };
+    const layer: Layer = down ? "under" : "surface";
+    this.world = new World(this.world.seed, down ? this.underChanges : this.surfaceChanges, layer);
+    this.mobs = [];
+    this.arrows = [];
+    if (!down && this.surfaceSpot) {
+      this.x = this.surfaceSpot.x;
+      this.y = this.surfaceSpot.y;
+    }
+    this.lastPortal = Math.floor(this.x) + "," + Math.floor(this.y);
+    this.say(down ? "You climb down into the caves" : "Back on the surface");
+    this.save();
+  }
+
 
   private findSpawn() {
     for (let r = 0; r < 400; r++) {
