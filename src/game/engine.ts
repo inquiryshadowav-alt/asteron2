@@ -491,6 +491,8 @@ export class Game {
       if (this.canStand(nx, this.y)) this.x = nx;
       if (this.canStand(this.x, ny)) this.y = ny;
     }
+    this.checkPortal();
+
 
     this.useLogic(dt);
     this.updateCrops();
