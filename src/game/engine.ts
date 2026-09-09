@@ -701,8 +701,9 @@ export class Game {
 
   // ---------- mobs ----------
   inCave(x = this.x, y = this.y) {
-    return this.world.get(Math.floor(x), Math.floor(y)).t === "cave";
+    return this.world.layer === "under" || this.world.get(Math.floor(x), Math.floor(y)).t === "cave";
   }
+
 
   private trySpawn() {
     const night = this.isNight() || this.inCave();
