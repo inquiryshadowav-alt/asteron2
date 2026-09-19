@@ -195,6 +195,12 @@ export class World {
         }
         // one cave entrance per cave region, sitting right above its cave system
         if (t !== "water" && this.anchorAt(wx, wy)) {
+          // stone is solid and an object tile can't be mined, so an entrance left on
+          // stone could never be reached — carve it out into walkable dirt instead
+          if (t === "stone") {
+            t = "dirt";
+            ore = undefined;
+          }
           obj = "cave_entrance";
         }
 
@@ -267,7 +273,8 @@ export function listWorlds(): WorldMeta[] {
 export function saveWorldMeta(meta: WorldMeta) {
   const all = listWorlds().filter((w) => w.id !== meta.id);
   all.unshift(meta);
-  localStorage.setItem(LIST_KEY, JSON.stringify(all.slice(0, 12)));
+  // no cap: slicing here silently dropped the oldest world from the list (its save became unreachable)
+  localStorage.setItem(LIST_KEY, JSON.stringify(all));
 }
 
 export function deleteWorld(id: string) {

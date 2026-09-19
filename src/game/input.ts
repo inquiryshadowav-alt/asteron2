@@ -33,6 +33,8 @@ export class InputMap {
   onInventory: (() => void) | null = null;
 
   private down = (e: KeyboardEvent) => {
+    // leave browser shortcuts (Ctrl+S, Ctrl+D, Cmd+W ...) alone instead of swallowing them
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const r = resolveAction(e);
     if (!r) return;
     if (r.slot) {
@@ -66,14 +68,19 @@ export class InputMap {
     this.held[r.action] = false;
   };
 
+  /** the keyup never arrives if the window loses focus mid-press, which left the player walking on its own */
+  private blur = () => this.clear();
+
   attach(target: Window) {
     target.addEventListener("keydown", this.down);
     target.addEventListener("keyup", this.up);
+    target.addEventListener("blur", this.blur);
   }
 
   detach(target: Window) {
     target.removeEventListener("keydown", this.down);
     target.removeEventListener("keyup", this.up);
+    target.removeEventListener("blur", this.blur);
   }
 
   consumeUse(): boolean {

@@ -102,6 +102,7 @@ export class Game {
   private saveTimer = 0;
   private spawnTimer = 0;
   private toastTimer = 0;
+  private starveFlash = 0;
 
   world: World;
   difficulty: "easy" | "hard";
@@ -239,7 +240,7 @@ export class Game {
     for (let r = 0; r < 400; r++) {
       const x = Math.floor(Math.random() * 60) - 30;
       const y = Math.floor(Math.random() * 60) - 30;
-      if (this.world.walkable(x, y)) return { x: x + 0.5, y: y + 0.5 };
+      if (this.world.walkable(x, y) && !this.world.get(x, y).obj) return { x: x + 0.5, y: y + 0.5 };
     }
     return { x: 0.5, y: 0.5 };
   }
@@ -447,7 +448,9 @@ export class Game {
     if (this.sleeping > 0) {
       this.sleeping -= dt;
       if (this.sleeping <= 0) {
-        this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + 20;
+        // night runs from tod 0.72 into tod 0.06 of the next day: only roll over if we're in the evening half
+        const evening = (this.time % DAY_LEN) / DAY_LEN > 0.5;
+        this.time = (Math.floor(this.time / DAY_LEN) + (evening ? 1 : 0)) * DAY_LEN + 20;
         this.mobs = this.mobs.filter((m) => !MOBS[m.kind].hostile);
         this.say("Good morning!");
       }
@@ -469,6 +472,12 @@ export class Game {
     if (this.hunger <= 0) {
       this.hunger = 0;
       this.hp -= dt * 2.5;
+      // starvation gets the same red damage pulse as a mob hit, about once a second
+      this.starveFlash -= dt;
+      if (this.starveFlash <= 0) {
+        this.starveFlash = 1;
+        this.hurtFlash = Math.max(this.hurtFlash, 0.35);
+      }
     } else if (this.hp < MAX_HP && this.hunger > 70) {
       this.hp = Math.min(MAX_HP, this.hp + dt * 1.2);
     }
@@ -605,8 +614,8 @@ export class Game {
     // harvest crop
     if (tile.obj && tile.obj.startsWith("crop")) {
       const stage = parseInt(tile.obj.slice(4), 10);
-      this.world.set(tx, ty, { ...tile, obj: undefined, pt: undefined });
       if (stage >= 3) {
+        this.world.set(tx, ty, { ...tile, obj: undefined, pt: undefined });
         this.give("wheat", 1);
         this.give("seeds", 1);
         this.say("Harvested wheat");
@@ -841,7 +850,10 @@ export class Game {
         const tx = Math.floor(m.x) + ox;
         const ty = Math.floor(m.y) + oy;
         const t = this.world.get(tx, ty);
-        if (t.obj && t.obj !== "mountain") this.world.set(tx, ty, { ...t, obj: undefined, pt: undefined });
+        // portals must survive: losing the cave exit would trap the player underground
+        if (t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit") {
+          this.world.set(tx, ty, { ...t, obj: undefined, pt: undefined });
+        }
       }
     }
     const dist = Math.hypot(this.x - m.x, this.y - m.y);
@@ -868,14 +880,21 @@ export class Game {
   }
 
   respawn() {
+    // dying in the caves must respawn on the surface, not at a random spot inside the rock
+    if (this.world.layer !== "surface") {
+      this.world = new World(this.world.seed, this.surfaceChanges, "surface");
+      this.surfaceSpot = null;
+    }
     const spot = this.findSpawn();
     this.x = spot.x;
     this.y = spot.y;
     this.hp = MAX_HP;
     this.hunger = MAX_HUNGER;
     this.dead = false;
+    this.hurtFlash = 0;
     this.mobs = [];
     this.arrows = [];
+    this.lastPortal = Math.floor(this.x) + "," + Math.floor(this.y);
     this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + 20;
     this.save();
     this.emit();
