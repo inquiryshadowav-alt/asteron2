@@ -172,7 +172,6 @@ export class World {
         const e = fbm(wx / 24, wy / 24, this.seed);
         const m = fbm(wx / 11 + 100, wy / 11 + 100, this.seed + 5001);
         let t: TileType = "grass";
-        let ore: Ore | undefined;
         let obj: ObjKind | undefined;
 
         if (e < 0.3) t = "water";
@@ -180,15 +179,8 @@ export class World {
         else if (e > 0.66) t = "stone";
         else t = m > 0.62 ? "dirt" : "grass";
 
+        // iron and diamond only exist underground (see genUnderChunk): surface stone is plain
         if (t === "stone") {
-          const cv = fbm(wx / 9 + 300, wy / 9 + 300, this.seed + 9001);
-          const o = hash2(wx, wy, this.seed + 777);
-          if (cv > 0.5) {
-            if (cv > 0.6 && o > 0.985) ore = "diamond";
-            else if (o > 0.93) ore = "iron";
-          } else if (o > 0.996) {
-            ore = "iron";
-          }
           if (e > 0.76 && hash2(wx, wy, this.seed + 31) > 0.55) obj = "mountain";
         } else if (t === "grass") {
           if (hash2(wx, wy, this.seed + 99) > 0.94) obj = "tree";
@@ -197,14 +189,11 @@ export class World {
         if (t !== "water" && this.anchorAt(wx, wy)) {
           // stone is solid and an object tile can't be mined, so an entrance left on
           // stone could never be reached — carve it out into walkable dirt instead
-          if (t === "stone") {
-            t = "dirt";
-            ore = undefined;
-          }
+          if (t === "stone") t = "dirt";
           obj = "cave_entrance";
         }
 
-        tiles[ty * CHUNK + tx] = { t, ore, obj };
+        tiles[ty * CHUNK + tx] = { t, obj };
       }
     }
     return tiles;
@@ -226,7 +215,11 @@ export class World {
 
   get(x: number, y: number): Tile {
     const ov = this.changes[key(x, y)];
-    if (ov) return ov;
+    if (ov) {
+      // ores are cave-only: older saves may still hold a surface ore in a tile the player edited
+      if (ov.ore && this.layer === "surface") return { ...ov, ore: undefined };
+      return ov;
+    }
     const cx = Math.floor(x / CHUNK);
     const cy = Math.floor(y / CHUNK);
     const c = this.chunk(cx, cy);

@@ -99,17 +99,85 @@ export function drawGround(c: Ctx, t: TileType, ore: string | undefined, x: numb
     px(c, x, y + q, S, q / 2, "#7d5730");
     px(c, x, y + 3 * q, S, q / 2, "#7d5730");
   }
-  if (ore) {
-    const img = sprite(ore === "iron" ? "iron_ingot" : "diamond_gem");
-    if (img) {
-      const s = S * 0.62;
-      c.drawImage(img, x + (S - s) / 2, y + (S - s) / 2, s, (img.naturalHeight / img.naturalWidth) * s);
-      return;
+  if (ore) drawOre(c, ore, x, y, S);
+}
+
+// ---------- ores ----------
+// Minecraft-style ore: the plain stone tile underneath with clumps of ore pixels on top.
+// 16x16 pixel maps: a = ore, l = highlight, d = shade, . = show the stone.
+export const ORE_ART: Record<string, string[]> = {
+  iron: [
+    "................",
+    "..dd............",
+    ".dlad....dld....",
+    ".daad....aaa....",
+    "..dd.....dad....",
+    "................",
+    ".......dd.......",
+    "......dlad......",
+    ".....dlaad......",
+    "......dad.......",
+    ".......d....dd..",
+    "..da.......dla..",
+    "..dd.......dad..",
+    "........da......",
+    "........dd......",
+    "................",
+  ],
+  diamond: [
+    "................",
+    "....dd.....dd...",
+    "...dlad...dla...",
+    "..dlaad...dad...",
+    "...dad..........",
+    "....d...........",
+    "..........dd....",
+    ".........dlad...",
+    ".........daad...",
+    "...dld....dd....",
+    "...aaa..........",
+    "...dad..........",
+    ".......da...da..",
+    ".......dd...dd..",
+    "................",
+    "................",
+  ],
+};
+
+export const ORE_PALETTE: Record<string, Record<string, string>> = {
+  iron: { a: "#d8af93", l: "#eecdb2", d: "#967056" },
+  diamond: { a: "#5decf5", l: "#d6fcff", d: "#26a0ac" },
+};
+
+const oreCache: Record<string, HTMLCanvasElement> = {};
+
+/** the ore overlay is drawn once per tile size, then blitted */
+function oreOverlay(ore: string, S: number): HTMLCanvasElement | null {
+  const cacheKey = ore + ":" + S;
+  const hit = oreCache[cacheKey];
+  if (hit) return hit;
+  const art = ORE_ART[ore];
+  const pal = ORE_PALETTE[ore];
+  if (!art || !pal || typeof document === "undefined") return null;
+  const cv = document.createElement("canvas");
+  cv.width = S;
+  cv.height = S;
+  const cc = cv.getContext("2d");
+  if (!cc) return null;
+  const u = S / 16;
+  art.forEach((row, iy) => {
+    for (let ix = 0; ix < row.length; ix++) {
+      const col = pal[row[ix]!];
+      if (col) px(cc, ix * u, iy * u, u, u, col);
     }
-    const col = ore === "iron" ? "#d9b48a" : "#4fe0d6";
-    px(c, x + q, y + q, q, q, col);
-    px(c, x + 2 * q, y + 2 * q, q, q, col);
-  }
+  });
+  oreCache[cacheKey] = cv;
+  return cv;
+}
+
+function drawOre(c: Ctx, ore: string, x: number, y: number, S: number) {
+  const overlay = oreOverlay(ore, S);
+  if (overlay) c.drawImage(overlay, Math.round(x), Math.round(y));
 }
 
 /** Tall objects are drawn from their base (bottom of tile). */
