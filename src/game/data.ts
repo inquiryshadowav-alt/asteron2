@@ -145,6 +145,8 @@ export interface ItemDef {
   seed?: boolean;
 }
 
+const HOE_ART = new Set<Tier>(["wood", "stone", "diamond"]);
+
 function tool(type: ToolType, tier: Tier): ItemDef {
   const names: Record<ToolType, string> = {
     sword: "Sword",
@@ -161,7 +163,8 @@ function tool(type: ToolType, tier: Tier): ItemDef {
     stack: 1,
     tool: { type, tier },
   };
-  if (type !== "hoe") def.icon = iconKey;
+  // hoes have their own art for wood / stone / diamond; the iron hoe still borrows the axe icon
+  if (type !== "hoe" || HOE_ART.has(tier)) def.icon = iconKey;
   else def.icon = `${tier}_axe`;
   return def;
 }
@@ -172,12 +175,12 @@ const list: ItemDef[] = [
   { id: "sand", name: "Sand", color: "#e6d9a2", stack: 64, place: "block_sand" },
   { id: "wood", name: "Wood", color: "#7b5220", stack: 64, place: "block_wood", icon: "log" },
   { id: "settings", name: "Settings Block", color: "#5a5f66", stack: 64, place: "block_settings", icon: "settings" },
-  { id: "iron", name: "Iron", color: "#d9d9d9", stack: 64, icon: "iron_ingot" },
-  { id: "diamond", name: "Diamond", color: "#4fe0d6", stack: 64, icon: "diamond_gem" },
+  { id: "iron", name: "Iron", color: "#d9d9d9", stack: 64, icon: "ingot_iron" },
+  { id: "diamond", name: "Diamond", color: "#4fe0d6", stack: 64, icon: "ingot_diamond" },
   { id: "iron_block", name: "Iron Block", color: "#e6e6e6", stack: 64, place: "block_iron", icon: "iron_block" },
   { id: "diamond_block", name: "Diamond Block", color: "#4fe0d6", stack: 64, place: "block_diamond", icon: "diamond_block" },
-  { id: "seeds", name: "Seeds", color: "#b9c94a", stack: 64, seed: true },
-  { id: "wheat", name: "Wheat", color: "#e0c04a", stack: 64, food: 20 },
+  { id: "seeds", name: "Seeds", color: "#b9c94a", stack: 64, seed: true, icon: "seeds" },
+  { id: "wheat", name: "Wheat", color: "#e0c04a", stack: 64, food: 20, icon: "wheat" },
   { id: "meat", name: "Meat", color: "#c4552f", stack: 64, food: 35, icon: "meat" },
   { id: "bed", name: "Sleeping Tube", color: "#7fd7f0", stack: 1, place: "bed", icon: "bed" },
   { id: "door", name: "Wooden Door", color: "#a3762f", stack: 4, place: "door_closed", icon: "door" },

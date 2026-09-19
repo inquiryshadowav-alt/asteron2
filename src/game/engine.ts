@@ -92,6 +92,8 @@ const SPEED = 4.4;
 const MAX_HP = 100;
 const MAX_HUNGER = 100;
 const INV_SIZE = 36;
+/** how close (in tiles) the player must be to click a cave open */
+const PORTAL_REACH = 2.5;
 
 export class Game {
   private canvas: HTMLCanvasElement;
@@ -103,6 +105,7 @@ export class Game {
   private spawnTimer = 0;
   private toastTimer = 0;
   private starveFlash = 0;
+  private portalCool = 0;
 
   world: World;
   difficulty: "easy" | "hard";
@@ -137,8 +140,6 @@ export class Game {
 
   private surfaceChanges: Record<string, Tile> = {};
   private underChanges: Record<string, Tile> = {};
-  private lastPortal = "";
-  private surfaceSpot: { x: number; y: number } | null = null;
 
   constructor(canvas: HTMLCanvasElement, opts: { saveId: string; seed: number; difficulty: "easy" | "hard"; save: WorldSave | null }) {
     this.canvas = canvas;
@@ -163,7 +164,6 @@ export class Game {
       this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? { id: s.id, n: s.n } : null));
       while (this.slots.length < INV_SIZE) this.slots.push(null);
       this.hotbar = opts.save.hotbarIndex ?? 0;
-      this.lastPortal = Math.floor(this.x) + "," + Math.floor(this.y);
     } else {
       const spot = this.findSpawn();
       this.x = spot.x;
@@ -178,6 +178,7 @@ export class Game {
     this.input.attach(window);
     this.input.onPause = () => this.togglePause();
     this.input.onInventory = () => this.toggleInventory();
+    this.canvas.addEventListener("pointerdown", this.onPointer);
     this.last = performance.now();
     const loop = (t: number) => {
       const dt = Math.min(0.05, (t - this.last) / 1000);
@@ -192,6 +193,7 @@ export class Game {
   stop() {
     cancelAnimationFrame(this.raf);
     this.input.detach(window);
+    this.canvas.removeEventListener("pointerdown", this.onPointer);
     this.save();
   }
 
@@ -209,32 +211,55 @@ export class Game {
     writeSave(this.saveId, data);
   }
 
-  /** walking onto a hole / ladder moves between the surface and the caves */
-  private checkPortal() {
-    const tx = Math.floor(this.x);
-    const ty = Math.floor(this.y);
-    const k = tx + "," + ty;
+  /**
+   * Cave entrances (surface) and exits (underground) are used on purpose: click / tap the
+   * cave, or press use (Enter / Space / A) while facing or standing on it. Just walking
+   * over one does nothing.
+   */
+  private usePortal(tx: number, ty: number) {
+    if (this.portalCool > 0) return;
     const obj = this.world.get(tx, ty).obj;
-    if (obj !== "cave_entrance" && obj !== "cave_exit") {
-      if (this.lastPortal === k) this.lastPortal = "";
-      return;
-    }
-    if (this.lastPortal === k) return;
+    if (obj !== "cave_entrance" && obj !== "cave_exit") return;
     const down = obj === "cave_entrance";
-    if (down) this.surfaceSpot = { x: this.x, y: this.y };
     const layer: Layer = down ? "under" : "surface";
     this.world = new World(this.world.seed, down ? this.underChanges : this.surfaceChanges, layer);
     this.mobs = [];
     this.arrows = [];
-    if (!down && this.surfaceSpot) {
-      this.x = this.surfaceSpot.x;
-      this.y = this.surfaceSpot.y;
-    }
-    this.lastPortal = Math.floor(this.x) + "," + Math.floor(this.y);
+    this.mining = 0;
+    this.miningKey = "";
+    // the exit below sits exactly under the entrance above, so both trips land on the portal tile
+    this.x = tx + 0.5;
+    this.y = ty + 0.5;
+    this.portalCool = 0.4;
     this.say(down ? "You climb down into the caves" : "Back on the surface");
     this.save();
   }
 
+  private tileSize() {
+    return Math.max(26, Math.min(46, Math.round(Math.min(this.canvas.width, this.canvas.height) / 16)));
+  }
+
+  /** mouse click / screen tap on the canvas: open a cave if one was clicked and is within reach */
+  private onPointer = (e: PointerEvent) => {
+    if (this.paused || this.invOpen || this.dead || this.sleeping > 0) return;
+    const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const S = this.tileSize();
+    // the canvas may be displayed at a different size than its pixel buffer
+    const px = (e.clientX - rect.left) * (W / rect.width);
+    const py = (e.clientY - rect.top) * (H / rect.height);
+    const tx = Math.floor((px + this.x * S - W / 2) / S);
+    const ty = Math.floor((py + this.y * S - H / 2) / S);
+    const obj = this.world.get(tx, ty).obj;
+    if (obj !== "cave_entrance" && obj !== "cave_exit") return;
+    if (Math.hypot(tx + 0.5 - this.x, ty + 0.5 - this.y) > PORTAL_REACH) {
+      this.say("Get closer to the cave");
+      return;
+    }
+    this.usePortal(tx, ty);
+  };
 
   private findSpawn() {
     for (let r = 0; r < 400; r++) {
@@ -466,6 +491,7 @@ export class Game {
     this.time += dt;
     if (this.hurtFlash > 0) this.hurtFlash -= dt;
     if (this.hitCool > 0) this.hitCool -= dt;
+    if (this.portalCool > 0) this.portalCool -= dt;
 
     // hunger + starvation
     this.hunger -= dt * (this.difficulty === "hard" ? 0.7 : 0.45);
@@ -500,8 +526,6 @@ export class Game {
       if (this.canStand(nx, this.y)) this.x = nx;
       if (this.canStand(this.x, ny)) this.y = ny;
     }
-    this.checkPortal();
-
 
     this.useLogic(dt);
     this.updateCrops();
@@ -559,6 +583,21 @@ export class Game {
       }
       this.mining = 0;
       return;
+    }
+
+    // go into / out of a cave: use on the cave in front of you, or on the one you're standing on
+    if (pressed) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y);
+      const here = this.world.get(px, py).obj;
+      if (tile.obj === "cave_entrance" || tile.obj === "cave_exit") {
+        this.usePortal(tx, ty);
+        return;
+      }
+      if (here === "cave_entrance" || here === "cave_exit") {
+        this.usePortal(px, py);
+        return;
+      }
     }
 
     // open / close a door
@@ -883,7 +922,6 @@ export class Game {
     // dying in the caves must respawn on the surface, not at a random spot inside the rock
     if (this.world.layer !== "surface") {
       this.world = new World(this.world.seed, this.surfaceChanges, "surface");
-      this.surfaceSpot = null;
     }
     const spot = this.findSpawn();
     this.x = spot.x;
@@ -894,7 +932,6 @@ export class Game {
     this.hurtFlash = 0;
     this.mobs = [];
     this.arrows = [];
-    this.lastPortal = Math.floor(this.x) + "," + Math.floor(this.y);
     this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + 20;
     this.save();
     this.emit();
@@ -905,7 +942,7 @@ export class Game {
     const c = this.ctx;
     const W = this.canvas.width;
     const H = this.canvas.height;
-    const S = Math.max(26, Math.min(46, Math.round(Math.min(W, H) / 16)));
+    const S = this.tileSize();
     c.imageSmoothingEnabled = false;
     c.fillStyle = "#1b1b1f";
     c.fillRect(0, 0, W, H);

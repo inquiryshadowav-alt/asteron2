@@ -152,6 +152,7 @@ function Home() {
             <ul className="muted list">
               <li>Arrows / WASD / D-pad — move</li>
               <li>Enter, Space or the A button — mine, place, hit</li>
+              <li>Click / tap a cave (or press Enter, Space or A next to it) to go in and out</li>
               <li>1–9 — pick a hotbar slot · 0 — inventory</li>
               <li>Esc / Back — pause</li>
               <li>Chop trees for wood, craft sticks, then tools</li>
