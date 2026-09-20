@@ -255,6 +255,28 @@ describe("tool durability in play", () => {
     expect(g.slots[g.hotbar]).toBeNull();
   });
 
+  it("breaking tall grass by hand gives a seed and leaves plain dirt", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "dirt", obj: "tall_grass" });
+    const seeds = g.countPublic("seeds");
+    priv(g).input.held["use"] = true;
+    priv(g).useLogic(0.05);
+    priv(g).useLogic(0.05); // a couple of frames is enough
+    priv(g).input.held["use"] = false;
+    expect(g.countPublic("seeds")).toBe(seeds + 1);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.world.get(6, 5).t).toBe("dirt");
+  });
+
+  it("collecting tall grass does not wear a tool", () => {
+    const g = makeGame();
+    hold(g, "wood_pickaxe");
+    g.world.set(6, 5, { t: "dirt", obj: "tall_grass" });
+    mineFor(g);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.slots[g.hotbar]!.dur).toBe(5);
+  });
+
   it("a diamond pickaxe lasts 20 blocks and iron ore counts as one use", () => {
     const g = makeGame();
     hold(g, "diamond_pickaxe");

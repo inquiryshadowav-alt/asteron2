@@ -61,6 +61,9 @@ export const key = (x: number, y: number) => x + "," + y;
 /** size of a cave region: at most one cave system per region */
 export const REGION = 28;
 
+/** chance that a natural dirt tile carries tall grass is 1 - GRASS_CUTOFF */
+const GRASS_CUTOFF = 0.65;
+
 interface Anchor {
   x: number;
   y: number;
@@ -186,6 +189,9 @@ export class World {
           if (e > 0.76 && hash2(wx, wy, this.seed + 31) > 0.55) obj = "mountain";
         } else if (t === "grass") {
           if (hash2(wx, wy, this.seed + 99) > 0.94) obj = "tree";
+        } else if (t === "dirt") {
+          // tufts of tall grass grow only on dirt; breaking one gives seeds
+          if (hash2(wx, wy, this.seed + 177) > GRASS_CUTOFF) obj = "tall_grass";
         }
         // one cave entrance per cave region, sitting right above its cave system
         if (t !== "water" && this.anchorAt(wx, wy)) {

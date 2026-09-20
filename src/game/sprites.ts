@@ -245,6 +245,31 @@ export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: n
       }
       break;
     }
+    case "tall_grass": {
+      // a tuft of blades on the dirt; two of them carry the seed heads you get by breaking it
+      const g = S / 16;
+      const bottom = baseY - S * 0.07;
+      const blades: [number, number, string][] = [
+        [2, 5, "#3f8a24"],
+        [3.6, 8, "#58b030"],
+        [5.2, 6, "#6fcf3c"],
+        [6.8, 10, "#58b030"],
+        [8.4, 7, "#3f8a24"],
+        [10, 9, "#6fcf3c"],
+        [11.6, 6, "#58b030"],
+        [13, 4, "#3f8a24"],
+      ];
+      for (const [bx, h, col] of blades) {
+        px(c, x + bx * g, bottom - h * g, g * 1.15, h * g, col);
+        px(c, x + bx * g, bottom - h * g - g * 0.8, g * 1.15, g * 0.8, "#9be25a");
+      }
+      for (const [bx, h] of [blades[3]!, blades[5]!]) {
+        const top = bottom - h * g - g * 0.8;
+        px(c, x + bx * g - g * 0.6, top - g * 1.6, g * 2.35, g * 1.6, "#e3d27a");
+        px(c, x + bx * g - g * 0.6, top - g * 1.6, g * 1.1, g * 0.8, "#f3e9a6");
+      }
+      break;
+    }
     case "crop0":
     case "crop1":
     case "crop2":

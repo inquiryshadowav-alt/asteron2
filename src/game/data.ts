@@ -22,7 +22,8 @@ export type ObjKind =
   | "crop0"
   | "crop1"
   | "crop2"
-  | "crop3";
+  | "crop3"
+  | "tall_grass";
 
 export interface Tile {
   t: TileType;
@@ -73,6 +74,7 @@ export const OBJ_SOLID: Record<ObjKind, boolean> = {
   crop1: false,
   crop2: false,
   crop3: false,
+  tall_grass: false,
 };
 
 /** objects drawn in the "tall" pass, sorted by base Y */
@@ -96,6 +98,7 @@ export const OBJ_TALL: Record<ObjKind, boolean> = {
   crop1: false,
   crop2: false,
   crop3: false,
+  tall_grass: false,
 };
 
 /** sprite key used for an object (undefined = procedural drawing) */

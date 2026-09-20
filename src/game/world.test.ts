@@ -113,3 +113,32 @@ describe("ore pixel art", () => {
     }
   });
 });
+
+describe("tall grass", () => {
+  function scan(layer: "surface" | "under", visit: (t: { t: string; obj?: string | undefined }, x: number, y: number, seed: number) => void) {
+    for (const seed of SEEDS) {
+      const w = new World(seed, {}, layer);
+      for (let y = -50; y < 50; y++) for (let x = -50; x < 50; x++) visit(w.get(x, y), x, y, seed);
+    }
+  }
+
+  it("only ever grows on dirt, and does grow on some of it", () => {
+    let tufts = 0;
+    let dirt = 0;
+    scan("surface", (t, x, y, seed) => {
+      if (t.t === "dirt") dirt++;
+      if (t.obj === "tall_grass") {
+        tufts++;
+        expect(t.t, `tall grass on ${t.t} at ${x},${y} (seed ${seed})`).toBe("dirt");
+      }
+    });
+    expect(tufts).toBeGreaterThan(50);
+    expect(tufts).toBeLessThan(dirt); // some dirt stays bare
+  });
+
+  it("is not in the caves, and can be walked through", () => {
+    scan("under", (t) => expect(t.obj).not.toBe("tall_grass"));
+    const w = new World(1, { "4,4": { t: "dirt", obj: "tall_grass" } }, "surface");
+    expect(w.walkable(4, 4)).toBe(true);
+  });
+});

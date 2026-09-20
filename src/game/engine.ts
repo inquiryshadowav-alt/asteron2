@@ -761,6 +761,8 @@ export class Game {
         if (!tier) return null;
         return { kind: "obj", rate: 0.4 + TIER_LEVEL[tier] * 0.35, drop: { id: "stone", n: 3 }, tool: "pickaxe" };
       }
+      // tall grass: nearly instant by hand, and the only wild source of seeds
+      if (tile.obj === "tall_grass") return { kind: "obj", rate: 12, drop: { id: "seeds", n: 1 } };
       if (tile.obj.startsWith("block_")) {
         const id = BLOCK_DROP[tile.obj] ?? "dirt";
         return { kind: "obj", rate: 1.6, drop: { id, n: 1 } };
