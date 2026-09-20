@@ -18,6 +18,7 @@ import a_ingot_iron from "./assets/ingot_iron.png";
 import a_insect from "./assets/insect.png";
 import a_iron_axe from "./assets/iron_axe.png";
 import a_iron_block from "./assets/iron_block.png";
+import a_iron_hoe from "./assets/iron_hoe.png";
 import a_iron_ingot from "./assets/iron_ingot.png";
 import a_iron_pickaxe from "./assets/iron_pickaxe.png";
 import a_iron_sword from "./assets/iron_sword.png";
@@ -60,6 +61,7 @@ export const SPRITE_URLS: Record<string, string> = {
   insect: a_insect,
   iron_axe: a_iron_axe,
   iron_block: a_iron_block,
+  iron_hoe: a_iron_hoe,
   iron_ingot: a_iron_ingot,
   iron_pickaxe: a_iron_pickaxe,
   iron_sword: a_iron_sword,

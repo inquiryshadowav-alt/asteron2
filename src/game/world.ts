@@ -50,8 +50,10 @@ export interface WorldSave {
   underChanges?: ChangeMap;
   layer?: Layer;
   player: { x: number; y: number; hp: number; hunger: number; time: number };
-  inv: (({ id: string; n: number }) | null)[];
+  inv: (({ id: string; n: number; dur?: number }) | null)[];
   hotbarIndex: number;
+  /** tile the player first spawned on, the (0, 0, 0) of the coordinate display */
+  origin?: { x: number; y: number };
 }
 
 export const key = (x: number, y: number) => x + "," + y;

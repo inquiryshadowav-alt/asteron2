@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { Game, type Hud } from "@/game/engine";
-import { ITEMS, RECIPES, type RecipeCategory } from "@/game/data";
+import { Game, type Hud, type Slot } from "@/game/engine";
+import { ITEMS, RECIPES, durabilityColor, maxDurability, usesLeft, type RecipeCategory } from "@/game/data";
 import { listWorlds, loadSave } from "@/game/world";
 import { SPRITE_URLS } from "@/game/sprite-assets";
 
@@ -107,9 +107,16 @@ function Play() {
               <div className="clock">
                 Day {hud.day} · {hud.night ? "Night" : "Day"}
               </div>
-              <button className="btn small" onClick={() => g?.togglePause()}>
-                Menu
-              </button>
+              <div className="hud-right">
+                <button className="btn small" onClick={() => g?.togglePause()}>
+                  Menu
+                </button>
+                <div className="coords" aria-label="Coordinates">
+                  <span>X {hud.pos.x}</span>
+                  <span>Y {hud.pos.y}</span>
+                  <span>Z {hud.pos.z}</span>
+                </div>
+              </div>
             </div>
 
             {hud.toast && <div className="toast">{hud.toast}</div>}
@@ -125,6 +132,7 @@ function Play() {
                     <>
                       <ItemIcon id={s.id} />
                       <span className="cnt">{s.n > 1 ? s.n : ""}</span>
+                      <DurBar slot={s} />
                     </>
                   )}
                   <span className="num">{i + 1}</span>
@@ -156,6 +164,7 @@ function Play() {
                           <>
                             <ItemIcon id={s.id} />
                             <span className="cnt">{s.n > 1 ? s.n : ""}</span>
+                            <DurBar slot={s} />
                           </>
                         )}
                       </button>
@@ -165,6 +174,8 @@ function Play() {
                     <div className="row held">
                       <span>
                         Holding: {ITEMS[hud.held.id]?.name ?? hud.held.id} x{hud.held.n}
+                        {maxDurability(hud.held.id) !== undefined &&
+                          ` (${usesLeft(hud.held)}/${maxDurability(hud.held.id)} uses)`}
                       </span>
                       <button className="btn small" onClick={() => g?.eatHeld()}>
                         Eat
@@ -261,6 +272,19 @@ function ItemIcon({ id }: { id: string }) {
   const url = def?.icon ? SPRITE_URLS[def.icon] : undefined;
   if (url) return <img className="ico" src={url} alt={def?.name ?? id} draggable={false} />;
   return <span className="chip" style={{ background: def?.color ?? "#888" }} />;
+}
+
+/** durability bar under a tool: green, then orange, then red as it wears out */
+function DurBar({ slot }: { slot: Slot }) {
+  const max = maxDurability(slot.id);
+  const left = usesLeft(slot);
+  if (max === undefined || left === undefined) return null;
+  const ratio = left / max;
+  return (
+    <span className="dur" title={`${left}/${max} uses left`}>
+      <span style={{ width: ratio * 100 + "%", background: durabilityColor(ratio) }} />
+    </span>
+  );
 }
 
 function Bar({ value, color, label }: { value: number; color: string; label: string }) {

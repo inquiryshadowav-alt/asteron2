@@ -145,7 +145,7 @@ export interface ItemDef {
   seed?: boolean;
 }
 
-const HOE_ART = new Set<Tier>(["wood", "stone", "diamond"]);
+const HOE_ART = new Set<Tier>(["wood", "stone", "iron", "diamond"]);
 
 function tool(type: ToolType, tier: Tier): ItemDef {
   const names: Record<ToolType, string> = {
@@ -163,7 +163,7 @@ function tool(type: ToolType, tier: Tier): ItemDef {
     stack: 1,
     tool: { type, tier },
   };
-  // hoes have their own art for wood / stone / diamond; the iron hoe still borrows the axe icon
+  // every hoe tier has its own art; fall back to the axe icon if one is ever missing
   if (type !== "hoe" || HOE_ART.has(tier)) def.icon = iconKey;
   else def.icon = `${tier}_axe`;
   return def;
@@ -231,3 +231,28 @@ export const RECIPES: Recipe[] = [
 
 /** minimum pickaxe tier level required to mine a material */
 export const MINE_REQ = { stone: 1, iron: 2, diamond: 3 };
+
+// ---------- tool durability ----------
+
+/** how many uses a tool survives, by material */
+export const TOOL_USES: Record<Tier, number> = { wood: 5, stone: 9, iron: 12, diamond: 20 };
+
+/** max durability of an item, or undefined when it isn't a tool */
+export function maxDurability(id: string): number | undefined {
+  const t = ITEMS[id]?.tool;
+  return t ? TOOL_USES[t.tier] : undefined;
+}
+
+/** uses left for a tool slot; tools from before durability existed count as brand new */
+export function usesLeft(slot: { id: string; dur?: number }): number | undefined {
+  const max = maxDurability(slot.id);
+  if (max === undefined) return undefined;
+  return Math.max(0, Math.min(max, slot.dur ?? max));
+}
+
+/** green while healthy, orange when getting low, red when nearly broken */
+export function durabilityColor(ratio: number): string {
+  if (ratio > 0.5) return "#4cc94c";
+  if (ratio > 0.25) return "#e8952b";
+  return "#d33b3b";
+}

@@ -6,6 +6,7 @@ import {
   OBJ_TALL,
   RECIPES,
   TIER_LEVEL,
+  maxDurability,
   type ObjKind,
   type Tier,
   type Tile,
@@ -18,6 +19,8 @@ import { drawGround, drawMob, drawObject, drawPlayer, preloadSprites } from "./s
 export interface Slot {
   id: string;
   n: number;
+  /** uses left; only tools have it (missing on a tool means brand new) */
+  dur?: number;
 }
 export type Slots = (Slot | null)[];
 
@@ -36,6 +39,8 @@ export interface Hud {
   held: Slot | null;
   mining: number;
   sleeping: boolean;
+  /** x / y / z relative to where the player first spawned; z is 0 outside and negative in the caves */
+  pos: { x: number; y: number; z: number };
 }
 
 type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper";
@@ -92,6 +97,8 @@ const SPEED = 4.4;
 const MAX_HP = 100;
 const MAX_HUNGER = 100;
 const INV_SIZE = 36;
+/** z shown for the cave layer (the surface is 0) */
+const CAVE_Z = -1;
 /** how close (in tiles) the player must be to click a cave open */
 const PORTAL_REACH = 2.5;
 
@@ -106,6 +113,9 @@ export class Game {
   private toastTimer = 0;
   private starveFlash = 0;
   private portalCool = 0;
+  /** tile the player first spawned on: coordinates are shown relative to it */
+  private originX = 0;
+  private originY = 0;
 
   world: World;
   difficulty: "easy" | "hard";
@@ -161,13 +171,18 @@ export class Game {
       this.hp = opts.save.player.hp;
       this.hunger = opts.save.player.hunger;
       this.time = opts.save.player.time;
-      this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? { id: s.id, n: s.n } : null));
+      this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? this.restoreSlot(s) : null));
       while (this.slots.length < INV_SIZE) this.slots.push(null);
       this.hotbar = opts.save.hotbarIndex ?? 0;
+      // worlds saved before coordinates existed have no origin: count from where the player is now
+      this.originX = opts.save.origin?.x ?? Math.floor(this.x);
+      this.originY = opts.save.origin?.y ?? Math.floor(this.y);
     } else {
       const spot = this.findSpawn();
       this.x = spot.x;
       this.y = spot.y;
+      this.originX = Math.floor(spot.x);
+      this.originY = Math.floor(spot.y);
       this.give("wood", 6);
       this.give("seeds", 3);
     }
@@ -197,6 +212,23 @@ export class Game {
     this.save();
   }
 
+  /** rebuild a saved slot; tools from older saves (no durability yet) start out brand new */
+  private restoreSlot(s: { id: string; n: number; dur?: number }): Slot {
+    const slot: Slot = { id: s.id, n: s.n };
+    const max = maxDurability(s.id);
+    if (max !== undefined) slot.dur = typeof s.dur === "number" && s.dur > 0 ? Math.min(s.dur, max) : max;
+    return slot;
+  }
+
+  /** player tile relative to the spawn origin; y grows upwards, z is 0 outside and negative in the caves */
+  coords() {
+    return {
+      x: Math.floor(this.x) - this.originX,
+      y: this.originY - Math.floor(this.y),
+      z: this.world.layer === "under" ? CAVE_Z : 0,
+    };
+  }
+
   save() {
     const data: WorldSave = {
       seed: this.world.seed,
@@ -205,8 +237,9 @@ export class Game {
       underChanges: this.underChanges,
       layer: this.world.layer,
       player: { x: this.x, y: this.y, hp: this.hp, hunger: this.hunger, time: this.time },
-      inv: this.slots.map((s) => (s ? { id: s.id, n: s.n } : null)),
+      inv: this.slots.map((s) => (s ? { ...s } : null)),
       hotbarIndex: this.hotbar,
+      origin: { x: this.originX, y: this.originY },
     };
     writeSave(this.saveId, data);
   }
@@ -283,7 +316,7 @@ export class Game {
     if (this.dead) return;
     this.invOpen = !this.invOpen;
     if (!this.invOpen && this.held) {
-      this.give(this.held.id, this.held.n);
+      this.give(this.held.id, this.held.n, this.held.dur);
       this.held = null;
     }
     this.input.clear();
@@ -317,11 +350,12 @@ export class Game {
       held: this.held ? { ...this.held } : null,
       mining: this.mining,
       sleeping: this.sleeping > 0,
+      pos: this.coords(),
     });
   }
 
   // ---------- inventory ----------
-  give(id: string, n: number): boolean {
+  give(id: string, n: number, dur?: number): boolean {
     const def = ITEMS[id];
     if (!def) return false;
     let left = n;
@@ -336,7 +370,10 @@ export class Game {
     for (let i = 0; i < INV_SIZE && left > 0; i++) {
       if (!this.slots[i]) {
         const add = Math.min(def.stack, left);
-        this.slots[i] = { id, n: add };
+        const slot: Slot = { id, n: add };
+        const max = maxDurability(id);
+        if (max !== undefined) slot.dur = dur ?? max; // new tools start with full durability
+        this.slots[i] = slot;
         left -= add;
       }
     }
@@ -426,6 +463,21 @@ export class Game {
 
   countPublic(id: string) {
     return this.countOf(id);
+  }
+
+  /** spend one use of the selected tool if it is the given type; it breaks at 0 */
+  private wear(type: ToolType) {
+    const s = this.slots[this.hotbar];
+    const def = s ? ITEMS[s.id] : undefined;
+    if (!s || !def?.tool || def.tool.type !== type) return;
+    s.dur = (s.dur ?? maxDurability(s.id) ?? 1) - 1;
+    if (s.dur <= 0) {
+      this.slots[this.hotbar] = null;
+      this.mining = 0;
+      this.miningKey = "";
+      this.say(`Your ${def.name} broke!`);
+    }
+    this.emit();
   }
 
   private toolOf(type: ToolType): Tier | null {
@@ -570,6 +622,7 @@ export class Game {
         const tier = this.toolOf("sword");
         const dmg = tier ? 4 + TIER_LEVEL[tier] * 3 : 3;
         target.hp -= dmg;
+        this.wear("sword");
         target.hurt = 0.35;
         target.flee = 1.4;
         const away = Math.atan2(target.y - this.y, target.x - this.x);
@@ -641,6 +694,7 @@ export class Game {
     if (selDef?.tool?.type === "hoe" && (tile.t === "dirt" || tile.t === "grass") && !tile.obj) {
       this.world.set(tx, ty, { ...tile, t: "farmland" });
       this.say("Tilled soil");
+      this.wear("hoe");
       return;
     }
     // plant seeds
@@ -689,16 +743,23 @@ export class Game {
     }
   }
 
-  private mineTarget(tile: Tile): { kind: "obj" | "ore" | "stone"; rate: number; drop: { id: string; n: number } } | null {
+  private mineTarget(
+    tile: Tile,
+  ): { kind: "obj" | "ore" | "stone"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
     if (tile.obj) {
       if (tile.obj === "tree") {
         const tier = this.toolOf("axe");
-        return { kind: "obj", rate: tier ? 0.8 + TIER_LEVEL[tier] * 0.5 : 0.35, drop: { id: "wood", n: 3 } };
+        return {
+          kind: "obj",
+          rate: tier ? 0.8 + TIER_LEVEL[tier] * 0.5 : 0.35,
+          drop: { id: "wood", n: 3 },
+          tool: tier ? "axe" : undefined,
+        };
       }
       if (tile.obj === "mountain") {
         const tier = this.toolOf("pickaxe");
         if (!tier) return null;
-        return { kind: "obj", rate: 0.4 + TIER_LEVEL[tier] * 0.35, drop: { id: "stone", n: 3 } };
+        return { kind: "obj", rate: 0.4 + TIER_LEVEL[tier] * 0.35, drop: { id: "stone", n: 3 }, tool: "pickaxe" };
       }
       if (tile.obj.startsWith("block_")) {
         const id = BLOCK_DROP[tile.obj] ?? "dirt";
@@ -715,12 +776,17 @@ export class Game {
       const need = tile.ore ? MINE_REQ[tile.ore] : MINE_REQ.stone;
       if (lvl < need) return null;
       const drop = tile.ore ? { id: tile.ore, n: 1 } : { id: "stone", n: 1 };
-      return { kind: tile.ore ? "ore" : "stone", rate: 0.35 + lvl * 0.3, drop };
+      return { kind: tile.ore ? "ore" : "stone", rate: 0.35 + lvl * 0.3, drop, tool: "pickaxe" };
     }
     return null;
   }
 
-  private breakTile(tx: number, ty: number, tile: Tile, mine: { kind: string; drop: { id: string; n: number } }) {
+  private breakTile(
+    tx: number,
+    ty: number,
+    tile: Tile,
+    mine: { kind: string; drop: { id: string; n: number }; tool?: ToolType | undefined },
+  ) {
     if (mine.kind === "obj") {
       if (tile.obj === "bed" || tile.obj === "bed2") {
         for (const dx of [-1, 0, 1]) {
@@ -735,6 +801,7 @@ export class Game {
       this.world.set(tx, ty, { ...tile, t: "dirt", ore: undefined });
     }
     this.give(mine.drop.id, mine.drop.n);
+    if (mine.tool) this.wear(mine.tool); // one use per block broken
   }
 
   private updateCrops() {
@@ -883,15 +950,18 @@ export class Game {
   private explode(m: Mob, dmg: number) {
     this.booms.push({ x: m.x, y: m.y, t: 0.5 });
     this.mobs = this.mobs.filter((o) => o !== m);
-    for (let ox = -2; ox <= 2; ox++) {
-      for (let oy = -2; oy <= 2; oy++) {
-        if (ox * ox + oy * oy > 5) continue;
-        const tx = Math.floor(m.x) + ox;
-        const ty = Math.floor(m.y) + oy;
-        const t = this.world.get(tx, ty);
-        // portals must survive: losing the cave exit would trap the player underground
-        if (t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit") {
-          this.world.set(tx, ty, { ...t, obj: undefined, pt: undefined });
+    // explosions hurt but never reshape the caves: underground nothing is destroyed at all,
+    // and on the surface the cave entrance is always left standing
+    if (this.world.layer !== "under") {
+      for (let ox = -2; ox <= 2; ox++) {
+        for (let oy = -2; oy <= 2; oy++) {
+          if (ox * ox + oy * oy > 5) continue;
+          const tx = Math.floor(m.x) + ox;
+          const ty = Math.floor(m.y) + oy;
+          const t = this.world.get(tx, ty);
+          if (t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit") {
+            this.world.set(tx, ty, { ...t, obj: undefined, pt: undefined });
+          }
         }
       }
     }
