@@ -54,7 +54,7 @@ export interface WorldSave {
   hotbarIndex: number;
   /** tile the player first spawned on, the (0, 0, 0) of the coordinate display */
   origin?: { x: number; y: number };
-  /** 2 once tool durability uses the current numbers; older saves get their tools carried over */
+  /** which durability table the tools were counted in (see TOOLS_VERSION); older saves get their tools carried over */
   toolsV?: number;
 }
 

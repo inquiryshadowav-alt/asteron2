@@ -6,7 +6,8 @@ import {
   OBJ_TALL,
   RECIPES,
   TIER_LEVEL,
-  LEGACY_TOOL_USES,
+  OLD_TOOL_USES,
+  TOOLS_VERSION,
   maxDurability,
   type ObjKind,
   type Tier,
@@ -119,8 +120,25 @@ interface Arrow {
   life: number;
 }
 
-/** seconds per full day; a night is about a third of it */
-export const DAY_LEN = 420;
+/** a full day is 7 minutes of daylight followed by 7 minutes of night */
+export const DAY_LEN = 840;
+/** fraction of the day at which night begins: day and night are exactly equal */
+const NIGHT_START = 0.5;
+/** where in a fresh day the morning sits: the world wakes up here after sleeping or respawning */
+export const MORNING = DAY_LEN * 0.1;
+
+/**
+ * How dark it is (0 = bright, 1 = darkest) at a time of day (0..1). Dusk builds up around the moment
+ * night begins and dawn fades out around the moment it ends, so both halves feel the same.
+ */
+export function darknessAt(tod: number): number {
+  if (tod < 0.08) return 1 - (tod + 0.08) / 0.16; // the tail of dawn
+  if (tod < 0.42) return 0;
+  if (tod < 0.58) return (tod - 0.42) / 0.16; // dusk
+  if (tod < 0.92) return 1;
+  return 1 - (tod - 0.92) / 0.16; // dawn begins
+}
+
 /** how far (in tiles) a torch lights up its surroundings, and keeps monsters from spawning */
 export const TORCH_RADIUS = 5;
 const SPEED = 4.4;
@@ -156,7 +174,7 @@ export class Game {
   dir: "up" | "down" | "left" | "right" = "down";
   hp = MAX_HP;
   hunger = MAX_HUNGER;
-  time = 40;
+  time = MORNING;
   hurtFlash = 0;
   hitCool = 0;
 
@@ -203,9 +221,9 @@ export class Game {
       this.hp = opts.save.player.hp;
       this.hunger = opts.save.player.hunger;
       this.time = opts.save.player.time;
-      // saves from before the tool rebalance (no toolsV) keep the same amount of wear on their tools
-      const oldBalance = opts.save.toolsV !== 2;
-      this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? this.restoreSlot(s, oldBalance) : null));
+      // tools saved under an older durability table keep the same amount of wear
+      const fromVersion = opts.save.toolsV ?? 1;
+      this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? this.restoreSlot(s, fromVersion) : null));
       while (this.slots.length < INV_SIZE) this.slots.push(null);
       this.hotbar = opts.save.hotbarIndex ?? 0;
       // worlds saved before coordinates existed have no origin: count from where the player is now
@@ -247,13 +265,14 @@ export class Game {
   }
 
   /** rebuild a saved slot; tools from older saves (no durability yet) start out brand new */
-  private restoreSlot(s: { id: string; n: number; dur?: number }, oldBalance = false): Slot {
+  private restoreSlot(s: { id: string; n: number; dur?: number }, fromVersion = TOOLS_VERSION): Slot {
     const slot: Slot = { id: s.id, n: s.n };
     const max = maxDurability(s.id);
     const tier = ITEMS[s.id]?.tool?.tier;
     if (max !== undefined && tier) {
       let dur = typeof s.dur === "number" && s.dur > 0 ? s.dur : max;
-      if (oldBalance && typeof s.dur === "number") dur += max - LEGACY_TOOL_USES[tier];
+      const old = fromVersion < TOOLS_VERSION ? OLD_TOOL_USES[fromVersion] : undefined;
+      if (old && typeof s.dur === "number") dur += max - old[tier];
       slot.dur = Math.max(1, Math.min(dur, max));
     }
     return slot;
@@ -279,7 +298,7 @@ export class Game {
       inv: this.slots.map((s) => (s ? { ...s } : null)),
       hotbarIndex: this.hotbar,
       origin: { x: this.originX, y: this.originY },
-      toolsV: 2,
+      toolsV: TOOLS_VERSION,
     };
     writeSave(this.saveId, data);
   }
@@ -530,7 +549,7 @@ export class Game {
   // ---------- simulation ----------
   private isNight() {
     const tod = (this.time % DAY_LEN) / DAY_LEN;
-    return tod > 0.72 || tod < 0.06;
+    return tod >= NIGHT_START;
   }
 
   private canStand(x: number, y: number) {
@@ -565,9 +584,8 @@ export class Game {
     if (this.sleeping > 0) {
       this.sleeping -= dt;
       if (this.sleeping <= 0) {
-        // night runs from tod 0.72 into tod 0.06 of the next day: only roll over if we're in the evening half
-        const evening = (this.time % DAY_LEN) / DAY_LEN > 0.5;
-        this.time = (Math.floor(this.time / DAY_LEN) + (evening ? 1 : 0)) * DAY_LEN + 20;
+        // night is the second half of a day, so sleeping always wakes up in the next day's morning
+        this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + MORNING;
         this.mobs = this.mobs.filter((m) => !MOBS[m.kind].hostile);
         this.say("Good morning!");
       }
@@ -1148,7 +1166,7 @@ export class Game {
     this.hurtFlash = 0;
     this.mobs = [];
     this.arrows = [];
-    this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + 20;
+    this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + MORNING;
     this.save();
     this.emit();
   }
@@ -1245,11 +1263,7 @@ export class Game {
 
     // day/night tint
     const tod = (this.time % DAY_LEN) / DAY_LEN;
-    let dark = 0;
-    if (tod > 0.62 && tod < 0.78) dark = (tod - 0.62) / 0.16;
-    else if (tod >= 0.78 || tod < 0.04) dark = 1;
-    else if (tod >= 0.04 && tod < 0.14) dark = 1 - (tod - 0.04) / 0.1;
-    dark *= 0.62;
+    let dark = darknessAt(tod) * 0.62;
     if (this.sleeping > 0) dark = Math.max(dark, 1 - this.sleeping / 1.6 < 0.5 ? 0.95 : 0.95);
     const cave = this.inCave();
     if (dark > 0 || cave) this.drawDarkness(c, W, H, S, camX, camY, dark, cave);

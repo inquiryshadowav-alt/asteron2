@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { DAY_LEN, Game, TORCH_RADIUS } from "./engine";
+import { DAY_LEN, Game, MORNING, TORCH_RADIUS, darknessAt } from "./engine";
+import { TOOLS_VERSION } from "./data";
 import { World, type WorldSave } from "./world";
 
 // The engine only touches the canvas through getContext, so a stub is enough for logic tests.
@@ -105,12 +106,23 @@ describe("sleeping", () => {
     return g.time;
   }
 
-  it("wakes up the next morning when going to bed in the evening", () => {
-    expect(sleepAt(DAY * 2 + 0.8 * DAY)).toBe(DAY * 3 + 20);
+  it("wakes up in the next morning, whenever in the night you went to bed", () => {
+    for (const tod of [0.5, 0.7, 0.99]) {
+      expect(sleepAt(DAY * 2 + tod * DAY), `tod ${tod}`).toBe(DAY * 3 + MORNING);
+    }
   });
 
-  it("does not skip a whole extra day when it is already past midnight", () => {
-    expect(sleepAt(DAY * 3 + 0.03 * DAY)).toBe(DAY * 3 + 20);
+  it("only works at night", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", obj: "bed" });
+    g.time = DAY * 2 + 0.3 * DAY; // daytime
+    priv(g).input.pressedUse = true;
+    priv(g).useLogic(0.016);
+    expect(g.sleeping).toBe(0);
+    g.time = DAY * 2 + 0.7 * DAY;
+    priv(g).input.pressedUse = true;
+    priv(g).useLogic(0.016);
+    expect(g.sleeping).toBeGreaterThan(0);
   });
 });
 
@@ -238,7 +250,7 @@ describe("tool durability in play", () => {
     g.give("iron_sword", 1);
     g.give("diamond_hoe", 1);
     const dur = (id: string) => g.slots.find((s) => s?.id === id)!.dur;
-    expect([dur("wood_pickaxe"), dur("stone_axe"), dur("iron_sword"), dur("diamond_hoe")]).toEqual([12, 9, 27, 40]);
+    expect([dur("wood_pickaxe"), dur("stone_axe"), dur("iron_sword"), dur("diamond_hoe")]).toEqual([12, 18, 27, 40]);
   });
 
   it("a wooden pickaxe breaks after 12 blocks", () => {
@@ -292,13 +304,13 @@ describe("tool durability in play", () => {
     hold(g, "stone_axe");
     g.world.set(6, 5, { t: "grass", obj: "tree" });
     mineFor(g);
-    expect(g.slots[g.hotbar]!.dur).toBe(8);
+    expect(g.slots[g.hotbar]!.dur).toBe(17);
 
     hold(g, "stone_pickaxe");
     g.world.set(6, 5, { t: "grass", obj: "tree" });
     mineFor(g);
     expect(g.world.get(6, 5).obj).toBeUndefined(); // still chopped, slowly
-    expect(g.slots[g.hotbar]!.dur).toBe(9); // pickaxe untouched
+    expect(g.slots[g.hotbar]!.dur).toBe(18); // pickaxe untouched
   });
 
   it("a hoe wears once per tilled tile", () => {
@@ -354,7 +366,7 @@ describe("tool durability in play", () => {
       g.save();
       const saved = JSON.parse(store.get([...store.keys()].find((k) => k.includes("test"))!)!) as WorldSave;
       expect(saved.inv[2]).toEqual({ id: "iron_pickaxe", n: 1, dur: 7 });
-      expect(saved.toolsV).toBe(2);
+      expect(saved.toolsV).toBe(TOOLS_VERSION);
 
       const base: WorldSave = {
         seed: 1234,
@@ -376,14 +388,32 @@ describe("tool durability in play", () => {
       expect(loaded.slots[2]).toEqual({ id: "diamond_sword", n: 1, dur: 40 });
       expect(loaded.slots[3]).toEqual({ id: "wood", n: 12 });
 
-      // a save made after the rebalance is taken as it is
-      const modern = new Game(makeCanvas(), {
+      // a save from the previous table (stone was 9): the stone tool gains the extra 9, the others stay put
+      const inv = [
+        { id: "stone_axe", n: 1, dur: 4 },
+        { id: "wood_axe", n: 1, dur: 4 },
+        { id: "iron_pickaxe", n: 1, dur: 7 },
+      ];
+      const v2 = new Game(makeCanvas(), {
         saveId: "t3",
         seed: 1234,
         difficulty: "easy",
-        save: { ...base, toolsV: 2 },
+        save: { ...base, inv, toolsV: 2 },
       });
-      expect(modern.slots[0]).toEqual({ id: "iron_pickaxe", n: 1, dur: 7 });
+      expect(v2.slots.slice(0, 3)).toEqual([
+        { id: "stone_axe", n: 1, dur: 13 },
+        { id: "wood_axe", n: 1, dur: 4 },
+        { id: "iron_pickaxe", n: 1, dur: 7 },
+      ]);
+
+      // a save made with the current table is taken as it is
+      const current = new Game(makeCanvas(), {
+        saveId: "t4",
+        seed: 1234,
+        difficulty: "easy",
+        save: { ...base, inv, toolsV: TOOLS_VERSION },
+      });
+      expect(current.slots.slice(0, 3)).toEqual(inv);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -672,8 +702,46 @@ describe("mob deaths", () => {
 });
 
 describe("days", () => {
-  it("are longer than the old five minutes", () => {
-    expect(DAY_LEN).toBeGreaterThan(300);
+  it("are 7 minutes of daylight followed by 7 minutes of night", () => {
+    expect(DAY_LEN).toBe(14 * 60);
+    const g = makeGame();
+    let day = 0;
+    let night = 0;
+    for (let t = 0; t < DAY_LEN; t++) {
+      g.time = DAY_LEN * 4 + t;
+      if (priv(g).isNight()) night++;
+      else day++;
+    }
+    expect(day).toBe(7 * 60);
+    expect(night).toBe(7 * 60);
+  });
+
+  it("start in bright daylight", () => {
+    const g = new Game(makeCanvas(), { saveId: "d1", seed: 1234, difficulty: "easy", save: null });
+    expect(g.time).toBe(MORNING);
+    expect(priv(g).isNight()).toBe(false);
+    expect(darknessAt((g.time % DAY_LEN) / DAY_LEN)).toBe(0);
+  });
+
+  it("fade in and out around the same points, and never jump", () => {
+    expect(darknessAt(0.25)).toBe(0); // midday
+    expect(darknessAt(0.75)).toBe(1); // midnight
+    expect(darknessAt(0.5)).toBeCloseTo(0.5, 5); // night begins: dusk is half way
+    expect(darknessAt(0)).toBeCloseTo(0.5, 5); // night ends: dawn is half way
+    // no jump across the start of a new day
+    expect(Math.abs(darknessAt(0.9999) - darknessAt(0))).toBeLessThan(0.01);
+    // every step through the whole day changes the darkness only a little
+    let prev = darknessAt(0);
+    for (let i = 1; i <= 1000; i++) {
+      const d = darknessAt(i / 1000);
+      expect(Math.abs(d - prev)).toBeLessThan(0.02);
+      prev = d;
+    }
+    // and the two halves are mirror images
+    for (const off of [0.02, 0.05, 0.08]) {
+      expect(darknessAt(0.5 - off) + darknessAt(0.5 + off)).toBeCloseTo(1, 5);
+      expect(darknessAt(1 - off) + darknessAt(off)).toBeCloseTo(1, 5);
+    }
   });
 });
 

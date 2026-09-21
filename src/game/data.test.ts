@@ -7,7 +7,7 @@ const TYPES = ["pickaxe", "axe", "sword", "hoe"];
 
 describe("tool durability", () => {
   it("gives every tool the uses for its material", () => {
-    expect(TOOL_USES).toEqual({ wood: 12, stone: 9, iron: 27, diamond: 40 });
+    expect(TOOL_USES).toEqual({ wood: 12, stone: 18, iron: 27, diamond: 40 });
     for (const tier of TIERS) {
       for (const type of TYPES) expect(maxDurability(`${tier}_${type}`), `${tier}_${type}`).toBe(TOOL_USES[tier]);
     }

@@ -245,10 +245,16 @@ export const MINE_REQ = { stone: 1, coal: 1, iron: 2, diamond: 3 };
 // ---------- tool durability ----------
 
 /** how many uses a tool survives, by material */
-export const TOOL_USES: Record<Tier, number> = { wood: 12, stone: 9, iron: 27, diamond: 40 };
+export const TOOL_USES: Record<Tier, number> = { wood: 12, stone: 18, iron: 27, diamond: 40 };
 
-/** what the numbers were before the rebalance; used to carry old saves over */
-export const LEGACY_TOOL_USES: Record<Tier, number> = { wood: 5, stone: 9, iron: 12, diamond: 20 };
+/** bumped whenever TOOL_USES changes; saves remember which version their tools were counted in */
+export const TOOLS_VERSION = 3;
+
+/** the tables of earlier versions, so an older save keeps the same amount of wear on its tools (1 = no version stored) */
+export const OLD_TOOL_USES: Record<number, Record<Tier, number>> = {
+  1: { wood: 5, stone: 9, iron: 12, diamond: 20 },
+  2: { wood: 12, stone: 9, iron: 27, diamond: 40 },
+};
 
 /** max durability of an item, or undefined when it isn't a tool */
 export function maxDurability(id: string): number | undefined {
