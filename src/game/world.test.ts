@@ -60,28 +60,49 @@ describe("world list", () => {
   });
 });
 
-describe("ores are cave-only", () => {
-  it("never generates iron or diamond on the surface", () => {
+describe("ores", () => {
+  it("never puts iron or diamond on the surface", () => {
     for (const seed of SEEDS) {
       const w = new World(seed, {}, "surface");
       for (let y = -60; y < 60; y++) {
         for (let x = -60; x < 60; x++) {
-          expect(w.get(x, y).ore, `surface ore at ${x},${y} (seed ${seed})`).toBeUndefined();
+          const ore = w.get(x, y).ore;
+          expect(ore === "iron" || ore === "diamond", `surface ${ore} at ${x},${y} (seed ${seed})`).toBe(false);
         }
       }
     }
   });
 
-  it("hides ores that older saves still hold in surface tiles", () => {
-    const w = new World(1, { "3,4": { t: "stone", ore: "iron" } }, "surface");
+  it("puts coal in surface stone, and only in surface stone", () => {
+    let coal = 0;
+    for (const seed of SEEDS) {
+      const w = new World(seed, {}, "surface");
+      for (let y = -80; y < 80; y++) {
+        for (let x = -80; x < 80; x++) {
+          const t = w.get(x, y);
+          if (t.ore === "coal") {
+            coal++;
+            expect(t.t, `coal on ${t.t} at ${x},${y} (seed ${seed})`).toBe("stone");
+            expect(t.obj, `coal hidden under ${t.obj} at ${x},${y}`).toBeUndefined();
+          }
+        }
+      }
+    }
+    expect(coal).toBeGreaterThan(20);
+  });
+
+  it("hides iron and diamond that older saves still hold in surface tiles, but keeps coal", () => {
+    const changes = { "3,4": { t: "stone", ore: "iron" }, "5,4": { t: "stone", ore: "coal" } } as const;
+    const w = new World(1, { ...changes } as never, "surface");
     expect(w.get(3, 4).ore).toBeUndefined();
     expect(w.get(3, 4).t).toBe("stone");
+    expect(w.get(5, 4).ore).toBe("coal");
     // the same tile in the caves is untouched
-    const under = new World(1, { "3,4": { t: "stone", ore: "iron" } }, "under");
+    const under = new World(1, { ...changes } as never, "under");
     expect(under.get(3, 4).ore).toBe("iron");
   });
 
-  it("generates both iron and diamond underground", () => {
+  it("generates coal, iron and diamond underground", () => {
     const found = new Set<string>();
     for (const seed of SEEDS) {
       const surface = new World(seed, {}, "surface");
@@ -99,7 +120,19 @@ describe("ores are cave-only", () => {
         }
       }
     }
-    expect([...found].sort()).toEqual(["diamond", "iron"]);
+    expect([...found].sort()).toEqual(["coal", "diamond", "iron"]);
+  });
+});
+
+describe("torch bookkeeping", () => {
+  it("tracks torches from saved changes and as they are placed and removed", () => {
+    const w = new World(1, { "2,3": { t: "grass", torch: true }, "4,4": { t: "grass" } });
+    expect([...w.torches]).toEqual(["2,3"]);
+    w.set(7, 7, { t: "stone", obj: "block_stone", torch: true });
+    expect(w.torches.has("7,7")).toBe(true);
+    w.set(2, 3, { t: "grass", torch: undefined });
+    expect(w.torches.has("2,3")).toBe(false);
+    expect(w.torches.size).toBe(1);
   });
 });
 

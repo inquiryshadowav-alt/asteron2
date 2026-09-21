@@ -6,6 +6,7 @@ import {
   OBJ_TALL,
   RECIPES,
   TIER_LEVEL,
+  LEGACY_TOOL_USES,
   maxDurability,
   type ObjKind,
   type Tier,
@@ -14,7 +15,7 @@ import {
 } from "./data";
 import { InputMap } from "./input";
 import { World, writeSave, type Layer, type WorldSave } from "./world";
-import { drawGround, drawMob, drawObject, drawPlayer, preloadSprites } from "./sprites";
+import { drawGround, drawMob, drawObject, drawPlayer, drawTorch, preloadSprites } from "./sprites";
 
 export interface Slot {
   id: string;
@@ -84,6 +85,32 @@ interface Mob {
   cave: boolean;
 }
 
+/** the two colours of the pixel burst when each kind of mob dies */
+const MOB_FX: Record<MobKind, [string, string]> = {
+  insect: ["#6fbf3a", "#c9f27a"],
+  hover: ["#7fd1ff", "#e6f7ff"],
+  builder: ["#d9a441", "#f5e1a0"],
+  corrupted: ["#7b3fa0", "#c084ff"],
+  phantom: ["#6b7bd6", "#dfe4ff"],
+  electric: ["#ffcf2e", "#fff7a0"],
+  creeper: ["#3f8a2a", "#9be25a"],
+};
+
+/** a square pixel of a visual effect; x / y are in world tiles */
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  /** size in 1/16ths of a tile */
+  size: number;
+  /** extra size gained over its life (smoke puffs swell) */
+  grow: number;
+  color: string;
+}
+
 interface Arrow {
   x: number;
   y: number;
@@ -92,7 +119,10 @@ interface Arrow {
   life: number;
 }
 
-const DAY_LEN = 300; // seconds per full day
+/** seconds per full day; a night is about a third of it */
+export const DAY_LEN = 420;
+/** how far (in tiles) a torch lights up its surroundings, and keeps monsters from spawning */
+export const TORCH_RADIUS = 5;
 const SPEED = 4.4;
 const MAX_HP = 100;
 const MAX_HUNGER = 100;
@@ -137,6 +167,8 @@ export class Game {
   mobs: Mob[] = [];
   arrows: Arrow[] = [];
   booms: { x: number; y: number; t: number }[] = [];
+  particles: Particle[] = [];
+  private lightCv: HTMLCanvasElement | null = null;
 
   invOpen = false;
   paused = false;
@@ -171,7 +203,9 @@ export class Game {
       this.hp = opts.save.player.hp;
       this.hunger = opts.save.player.hunger;
       this.time = opts.save.player.time;
-      this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? this.restoreSlot(s) : null));
+      // saves from before the tool rebalance (no toolsV) keep the same amount of wear on their tools
+      const oldBalance = opts.save.toolsV !== 2;
+      this.slots = opts.save.inv.slice(0, INV_SIZE).map((s) => (s ? this.restoreSlot(s, oldBalance) : null));
       while (this.slots.length < INV_SIZE) this.slots.push(null);
       this.hotbar = opts.save.hotbarIndex ?? 0;
       // worlds saved before coordinates existed have no origin: count from where the player is now
@@ -213,10 +247,15 @@ export class Game {
   }
 
   /** rebuild a saved slot; tools from older saves (no durability yet) start out brand new */
-  private restoreSlot(s: { id: string; n: number; dur?: number }): Slot {
+  private restoreSlot(s: { id: string; n: number; dur?: number }, oldBalance = false): Slot {
     const slot: Slot = { id: s.id, n: s.n };
     const max = maxDurability(s.id);
-    if (max !== undefined) slot.dur = typeof s.dur === "number" && s.dur > 0 ? Math.min(s.dur, max) : max;
+    const tier = ITEMS[s.id]?.tool?.tier;
+    if (max !== undefined && tier) {
+      let dur = typeof s.dur === "number" && s.dur > 0 ? s.dur : max;
+      if (oldBalance && typeof s.dur === "number") dur += max - LEGACY_TOOL_USES[tier];
+      slot.dur = Math.max(1, Math.min(dur, max));
+    }
     return slot;
   }
 
@@ -240,6 +279,7 @@ export class Game {
       inv: this.slots.map((s) => (s ? { ...s } : null)),
       hotbarIndex: this.hotbar,
       origin: { x: this.originX, y: this.originY },
+      toolsV: 2,
     };
     writeSave(this.saveId, data);
   }
@@ -584,6 +624,7 @@ export class Game {
     this.updateMobs(dt);
     this.updateArrows(dt);
     this.booms = this.booms.filter((b) => (b.t -= dt) > 0);
+    this.updateParticles(dt);
 
     if (this.hp <= 0 && !this.dead) {
       this.hp = 0;
@@ -628,11 +669,7 @@ export class Game {
         const away = Math.atan2(target.y - this.y, target.x - this.x);
         target.vx = Math.cos(away) * 3;
         target.vy = Math.sin(away) * 3;
-        if (target.hp <= 0) {
-          const d = MOBS[target.kind].drop;
-          if (d) this.give(d.id, d.n);
-          this.mobs = this.mobs.filter((m) => m !== target);
-        }
+        if (target.hp <= 0) this.killMob(target);
       }
       this.mining = 0;
       return;
@@ -671,6 +708,17 @@ export class Game {
     }
 
     // mining (hold)
+    // torches: stand one on open ground or mount it on a block / wall. This comes before mining so a
+    // torch in hand goes onto a block instead of chipping it away.
+    if (selDef?.torch && this.canPlaceTorch(tile)) {
+      if (pressed) {
+        this.world.set(tx, ty, { ...tile, torch: true });
+        this.take(sel!.id, 1);
+      }
+      this.mining = 0;
+      return;
+    }
+
     const mine = this.mineTarget(tile);
     if (holding && mine) {
       const k = tx + "," + ty;
@@ -743,9 +791,92 @@ export class Game {
     }
   }
 
+  /** torches go on open ground or on a block / wall; never on water, trees, ores, crops, doors, beds or cave mouths */
+  private canPlaceTorch(tile: Tile): boolean {
+    if (tile.torch || tile.ore || tile.t === "water") return false;
+    return tile.obj === undefined || tile.obj.startsWith("block_");
+  }
+
+  /** is a torch lighting this spot (within r tiles)? */
+  private nearTorch(x: number, y: number, r: number): boolean {
+    for (const k of this.world.torches) {
+      const [tx, ty] = k.split(",");
+      if (Math.hypot(Number(tx) + 0.5 - x, Number(ty) + 0.5 - y) <= r) return true;
+    }
+    return false;
+  }
+
+  /** a mob dies: it drops its loot and pops in a burst of pixels */
+  private killMob(m: Mob) {
+    const d = MOBS[m.kind].drop;
+    if (d) this.give(d.id, d.n);
+    this.mobs = this.mobs.filter((o) => o !== m);
+    this.deathFx(m);
+  }
+
+  private deathFx(m: Mob) {
+    const [a, b] = MOB_FX[m.kind];
+    const r = Math.random;
+    // shards of the mob's own colours
+    for (let i = 0; i < 14; i++) {
+      const ang = r() * Math.PI * 2;
+      const sp = 1.6 + r() * 2.6;
+      const max = 0.5 + r() * 0.35;
+      this.particles.push({
+        x: m.x,
+        y: m.y - 0.1,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp - 0.6,
+        life: max,
+        max,
+        size: 2 + Math.floor(r() * 2),
+        grow: 0,
+        color: i % 3 === 0 ? b : a,
+      });
+    }
+    // a few puffs of grey smoke that swell and drift up
+    for (let i = 0; i < 6; i++) {
+      const max = 0.7 + r() * 0.3;
+      this.particles.push({
+        x: m.x + (r() - 0.5) * 0.5,
+        y: m.y + (r() - 0.5) * 0.3,
+        vx: (r() - 0.5) * 0.6,
+        vy: -0.5 - r() * 0.6,
+        life: max,
+        max,
+        size: 3,
+        grow: 4,
+        color: i % 2 ? "#e9e9f0" : "#b8b8c6",
+      });
+    }
+    // a quick white sparkle cross
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      this.particles.push({ x: m.x, y: m.y, vx: dx * 5, vy: dy * 5, life: 0.22, max: 0.22, size: 3, grow: 0, color: "#ffffff" });
+    }
+  }
+
+  private updateParticles(dt: number) {
+    if (!this.particles.length) return;
+    const drag = Math.max(0, 1 - 2.2 * dt);
+    this.particles = this.particles.filter((p) => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= drag;
+      p.vy *= drag;
+      p.life -= dt;
+      return p.life > 0;
+    });
+  }
+
   private mineTarget(
     tile: Tile,
-  ): { kind: "obj" | "ore" | "stone"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
+  ): { kind: "obj" | "ore" | "stone" | "torch"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
+    if (tile.torch) {
+      // a torch comes off first; with a torch in hand nothing is mined, so a held key can't undo a placement
+      const held = this.slots[this.hotbar];
+      if (held && ITEMS[held.id]?.torch) return null;
+      return { kind: "torch", rate: 12, drop: { id: "torch", n: 1 } };
+    }
     if (tile.obj) {
       if (tile.obj === "tree") {
         const tier = this.toolOf("axe");
@@ -789,6 +920,11 @@ export class Game {
     tile: Tile,
     mine: { kind: string; drop: { id: string; n: number }; tool?: ToolType | undefined },
   ) {
+    if (mine.kind === "torch") {
+      this.world.set(tx, ty, { ...tile, torch: undefined });
+      this.give("torch", 1);
+      return;
+    }
     if (mine.kind === "obj") {
       if (tile.obj === "bed" || tile.obj === "bed2") {
         for (const dx of [-1, 0, 1]) {
@@ -842,7 +978,8 @@ export class Game {
       const r = 11 + Math.random() * 6;
       const x = this.x + Math.cos(a) * r;
       const y = this.y + Math.sin(a) * r;
-      if (this.world.walkable(Math.floor(x), Math.floor(y))) {
+      // light keeps monsters away: nothing spawns within a torch's glow
+      if (this.world.walkable(Math.floor(x), Math.floor(y)) && !this.nearTorch(x, y, TORCH_RADIUS + 1)) {
         this.mobs.push({
           kind,
           cave: this.inCave(x, y),
@@ -951,6 +1088,7 @@ export class Game {
 
   private explode(m: Mob, dmg: number) {
     this.booms.push({ x: m.x, y: m.y, t: 0.5 });
+    this.deathFx(m);
     this.mobs = this.mobs.filter((o) => o !== m);
     // explosions hurt but never reshape the caves: underground nothing is destroyed at all,
     // and on the surface the cave entrance is always left standing
@@ -961,8 +1099,14 @@ export class Game {
           const tx = Math.floor(m.x) + ox;
           const ty = Math.floor(m.y) + oy;
           const t = this.world.get(tx, ty);
-          if (t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit") {
-            this.world.set(tx, ty, { ...t, obj: undefined, pt: undefined });
+          const breaks = !!t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit";
+          if (breaks || t.torch) {
+            this.world.set(tx, ty, {
+              ...t,
+              obj: breaks ? undefined : t.obj,
+              pt: breaks ? undefined : t.pt,
+              torch: undefined,
+            });
           }
         }
       }
@@ -1050,12 +1194,15 @@ export class Game {
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const t = this.world.get(tx, ty);
-        if (!t.obj) continue;
+        if (!t.obj && !t.torch) continue;
         const sx = tx * S - camX;
         const by = (ty + 1) * S - camY;
-        const kind = t.obj;
-        if (OBJ_TALL[kind]) draws.push({ baseY: by, fn: () => drawObject(c, kind, sx, by, S) });
-        else drawObject(c, kind, sx, by, S);
+        if (t.obj) {
+          const kind = t.obj;
+          if (OBJ_TALL[kind]) draws.push({ baseY: by, fn: () => drawObject(c, kind, sx, by, S) });
+          else drawObject(c, kind, sx, by, S);
+        }
+        if (t.torch) drawTorch(c, sx, by, S, this.time, tx, ty);
       }
     }
     for (const m of this.mobs) {
@@ -1086,6 +1233,16 @@ export class Game {
       c.fill();
     }
 
+    // pixel bursts (mob deaths)
+    for (const p of this.particles) {
+      const grow = p.grow * (1 - p.life / p.max);
+      const sz = Math.max(2, Math.round(((p.size + grow) * S) / 16));
+      c.globalAlpha = Math.max(0, Math.min(1, p.life / (p.max * 0.6)));
+      c.fillStyle = p.color;
+      c.fillRect(Math.round(p.x * S - camX - sz / 2), Math.round(p.y * S - camY - sz / 2), sz, sz);
+    }
+    c.globalAlpha = 1;
+
     // day/night tint
     const tod = (this.time % DAY_LEN) / DAY_LEN;
     let dark = 0;
@@ -1094,22 +1251,8 @@ export class Game {
     else if (tod >= 0.04 && tod < 0.14) dark = 1 - (tod - 0.04) / 0.1;
     dark *= 0.62;
     if (this.sleeping > 0) dark = Math.max(dark, 1 - this.sleeping / 1.6 < 0.5 ? 0.95 : 0.95);
-    if (dark > 0) {
-      c.fillStyle = `rgba(6,10,40,${dark})`;
-      c.fillRect(0, 0, W, H);
-    }
-    // cave darkness: only a small circle around the player is lit
-    if (this.inCave()) {
-      const cx = W / 2;
-      const cy = H / 2;
-      const lit = S * 3.4;
-      const g = c.createRadialGradient(cx, cy, lit * 0.35, cx, cy, lit);
-      g.addColorStop(0, "rgba(4,4,8,0)");
-      g.addColorStop(0.65, "rgba(4,4,8,0.72)");
-      g.addColorStop(1, "rgba(2,2,5,0.985)");
-      c.fillStyle = g;
-      c.fillRect(0, 0, W, H);
-    }
+    const cave = this.inCave();
+    if (dark > 0 || cave) this.drawDarkness(c, W, H, S, camX, camY, dark, cave);
 
     if (this.hurtFlash > 0) {
       const a = Math.min(0.55, this.hurtFlash);
@@ -1121,6 +1264,78 @@ export class Game {
       vg.addColorStop(1, `rgba(190,15,15,${a})`);
       c.fillStyle = vg;
       c.fillRect(0, 0, W, H);
+    }
+  }
+
+  /**
+   * Night tint and cave darkness are drawn on their own layer so torches can cut holes in it:
+   * everything within a torch's radius is lit, with a soft edge and a little flicker.
+   */
+  private drawDarkness(c: CanvasRenderingContext2D, W: number, H: number, S: number, camX: number, camY: number, dark: number, cave: boolean) {
+    if (typeof document === "undefined") return;
+    if (!this.lightCv) this.lightCv = document.createElement("canvas");
+    const lc = this.lightCv;
+    if (lc.width !== W || lc.height !== H) {
+      lc.width = W;
+      lc.height = H;
+    }
+    const g = lc.getContext("2d");
+    if (!g) return;
+    g.globalCompositeOperation = "source-over";
+    g.clearRect(0, 0, W, H);
+    if (dark > 0) {
+      g.fillStyle = `rgba(6,10,40,${dark})`;
+      g.fillRect(0, 0, W, H);
+    }
+    if (cave) {
+      // only a small circle around the player is lit
+      const cx = W / 2;
+      const cy = H / 2;
+      const lit = S * 3.4;
+      const gr = g.createRadialGradient(cx, cy, lit * 0.35, cx, cy, lit);
+      gr.addColorStop(0, "rgba(4,4,8,0)");
+      gr.addColorStop(0.65, "rgba(4,4,8,0.72)");
+      gr.addColorStop(1, "rgba(2,2,5,0.985)");
+      g.fillStyle = gr;
+      g.fillRect(0, 0, W, H);
+    }
+
+    // torches punch light out of the darkness
+    const R = TORCH_RADIUS * S;
+    const lights: { x: number; y: number; r: number }[] = [];
+    for (const k of this.world.torches) {
+      const [tx, ty] = k.split(",");
+      const x = (Number(tx) + 0.5) * S - camX;
+      const y = (Number(ty) + 0.5) * S - camY;
+      if (x < -R * 1.1 || x > W + R * 1.1 || y < -R * 1.1 || y > H + R * 1.1) continue;
+      const flicker = 1 + 0.045 * Math.sin(this.time * 8 + Number(tx) * 1.7 + Number(ty) * 2.3);
+      lights.push({ x, y, r: R * flicker });
+    }
+    if (this.sleeping > 0) lights.length = 0; // falling asleep blacks everything out, torches included
+    g.globalCompositeOperation = "destination-out";
+    for (const l of lights) {
+      const gr = g.createRadialGradient(l.x, l.y, l.r * 0.15, l.x, l.y, l.r);
+      gr.addColorStop(0, "rgba(0,0,0,1)");
+      gr.addColorStop(0.55, "rgba(0,0,0,0.85)");
+      gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr;
+      g.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+    }
+    g.globalCompositeOperation = "source-over";
+    c.drawImage(lc, 0, 0);
+
+    // a warm glow on top, strongest when it is darkest
+    if (lights.length) {
+      const strength = cave ? 1 : Math.min(1, dark / 0.62);
+      c.globalCompositeOperation = "lighter";
+      for (const l of lights) {
+        const gr = c.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r * 0.9);
+        gr.addColorStop(0, `rgba(255,150,60,${0.22 * strength})`);
+        gr.addColorStop(1, "rgba(255,150,60,0)");
+        c.fillStyle = gr;
+        c.fillRect(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
+      }
+      c.globalCompositeOperation = "source-over";
     }
   }
 

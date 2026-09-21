@@ -124,6 +124,24 @@ export const ORE_ART: Record<string, string[]> = {
     "........dd......",
     "................",
   ],
+  coal: [
+    "................",
+    "..........dd....",
+    "...dd....dlaad..",
+    "..dlad...daaad..",
+    "..daad....daad..",
+    "...dd......dd...",
+    "................",
+    ".....dld........",
+    ".....aaa....dd..",
+    ".....dad...dlad.",
+    "...........daad.",
+    "..la........dd..",
+    "..dd...dld......",
+    ".......aaa......",
+    ".......dad......",
+    "................",
+  ],
   diamond: [
     "................",
     "....dd.....dd...",
@@ -147,6 +165,7 @@ export const ORE_ART: Record<string, string[]> = {
 export const ORE_PALETTE: Record<string, Record<string, string>> = {
   iron: { a: "#d8af93", l: "#eecdb2", d: "#967056" },
   diamond: { a: "#5decf5", l: "#d6fcff", d: "#26a0ac" },
+  coal: { a: "#1e1e26", l: "#585868", d: "#0a0a0e" },
 };
 
 const oreCache: Record<string, HTMLCanvasElement> = {};
@@ -338,4 +357,38 @@ export const MOB_SPRITE: Record<string, string> = {
 
 export function drawMob(c: Ctx, kind: string, x: number, baseY: number, S: number, flash: boolean, bob = 0) {
   drawBot(c, MOB_SPRITE[kind] ?? "insect", x, baseY, S, bob, flash);
+}
+
+// ---------- torch ----------
+// A torch is a small standing stick with a flickering pixel flame. Three flame frames, one letter
+// per pixel: R = red tip, O = orange, Y = hot yellow.
+const FLAME_FRAMES: string[][] = [
+  [".R..", ".OO.", "OOYO", "OYYO", ".OO."],
+  ["..R.", ".OO.", "OYYO", "OYYO", ".OO."],
+  [".R..", "ROO.", ".OYO", "OYYO", ".OO."],
+];
+const FLAME_COLORS: Record<string, string> = { R: "#ff5a1f", O: "#ff9a2b", Y: "#ffe36b" };
+
+/** draw a torch standing in the tile whose bottom edge is at `baseY`; `time` and the tile position desync the flicker */
+export function drawTorch(c: Ctx, x: number, baseY: number, S: number, time: number, tx: number, ty: number) {
+  const u = S / 16;
+  const top = baseY - S;
+  const frame = (Math.floor(time * 9) + tx * 3 + ty * 7) % FLAME_FRAMES.length;
+  // stick: dark outline, then three shades of wood
+  px(c, x + 5.9 * u, top + 6.9 * u, 4.2 * u, 8.4 * u, "#2a140a");
+  px(c, x + 6.5 * u, top + 7.5 * u, 1 * u, 7 * u, "#b98444");
+  px(c, x + 7.5 * u, top + 7.5 * u, 1.2 * u, 7 * u, "#8f5c2c");
+  px(c, x + 8.7 * u, top + 7.5 * u, 0.8 * u, 7 * u, "#5a3719");
+  // charred head
+  px(c, x + 5.9 * u, top + 5.4 * u, 4.2 * u, 2 * u, "#2a140a");
+  px(c, x + 6.4 * u, top + 5.9 * u, 3.2 * u, 1.2 * u, "#3a3632");
+  // flame
+  const rows = FLAME_FRAMES[frame]!;
+  rows.forEach((row, ry) => {
+    for (let rx = 0; rx < row.length; rx++) {
+      const col = FLAME_COLORS[row[rx]!];
+      if (col) px(c, x + (6 + rx) * u, top + (0.9 + ry) * u, u * 1.02, u * 1.02, col);
+    }
+  });
+  if (frame === 1) px(c, x + 7.6 * u, top + 0 * u, u * 0.8, u * 0.8, "#ffd27a"); // a stray spark
 }

@@ -54,6 +54,8 @@ export interface WorldSave {
   hotbarIndex: number;
   /** tile the player first spawned on, the (0, 0, 0) of the coordinate display */
   origin?: { x: number; y: number };
+  /** 2 once tool durability uses the current numbers; older saves get their tools carried over */
+  toolsV?: number;
 }
 
 export const key = (x: number, y: number) => x + "," + y;
@@ -63,6 +65,10 @@ export const REGION = 28;
 
 /** chance that a natural dirt tile carries tall grass is 1 - GRASS_CUTOFF */
 const GRASS_CUTOFF = 0.65;
+
+/** coal shows up in surface stone (about 6%) and in the cave rock (about 8% of what is left) */
+const SURFACE_COAL_CUTOFF = 0.94;
+const CAVE_COAL_CUTOFF = 0.92;
 
 interface Anchor {
   x: number;
@@ -75,11 +81,14 @@ export class World {
   changes: ChangeMap;
   private cache = new Map<string, Tile[]>();
   private anchors = new Map<string, Anchor | null>();
+  /** "x,y" of every tile carrying a torch, kept in sync so lighting never scans the whole map */
+  readonly torches = new Set<string>();
 
   constructor(seed: number, changes: ChangeMap = {}, layer: Layer = "surface") {
     this.seed = seed;
     this.changes = changes;
     this.layer = layer;
+    for (const [k, t] of Object.entries(changes)) if (t.torch) this.torches.add(k);
   }
 
   /** the single cave-system anchor of a region, or null when the region has no caves */
@@ -156,6 +165,7 @@ export class World {
           const depth = fbm(wx / 30 + 900, wy / 30 + 900, s + 31);
           if (depth > 0.6 && o > 0.945) ore = "diamond";
           else if (o > 0.85) ore = "iron";
+          else if (hash2(wx, wy, s + 555) > CAVE_COAL_CUTOFF) ore = "coal";
         } else if (this.anchorAt(wx, wy)) {
           obj = "cave_exit";
         } else if (hash2(wx, wy, s + 1234) > 0.99) {
@@ -184,9 +194,11 @@ export class World {
         else if (e > 0.66) t = "stone";
         else t = m > 0.62 ? "dirt" : "grass";
 
-        // iron and diamond only exist underground (see genUnderChunk): surface stone is plain
+        // iron and diamond only exist underground (see genUnderChunk); surface stone can hold coal
+        let ore: Ore | undefined;
         if (t === "stone") {
           if (e > 0.76 && hash2(wx, wy, this.seed + 31) > 0.55) obj = "mountain";
+          else if (hash2(wx, wy, this.seed + 555) > SURFACE_COAL_CUTOFF) ore = "coal";
         } else if (t === "grass") {
           if (hash2(wx, wy, this.seed + 99) > 0.94) obj = "tree";
         } else if (t === "dirt") {
@@ -197,11 +209,14 @@ export class World {
         if (t !== "water" && this.anchorAt(wx, wy)) {
           // stone is solid and an object tile can't be mined, so an entrance left on
           // stone could never be reached — carve it out into walkable dirt instead
-          if (t === "stone") t = "dirt";
+          if (t === "stone") {
+            t = "dirt";
+            ore = undefined;
+          }
           obj = "cave_entrance";
         }
 
-        tiles[ty * CHUNK + tx] = { t, obj };
+        tiles[ty * CHUNK + tx] = { t, ore, obj };
       }
     }
     return tiles;
@@ -224,8 +239,8 @@ export class World {
   get(x: number, y: number): Tile {
     const ov = this.changes[key(x, y)];
     if (ov) {
-      // ores are cave-only: older saves may still hold a surface ore in a tile the player edited
-      if (ov.ore && this.layer === "surface") return { ...ov, ore: undefined };
+      // iron and diamond are cave-only: older saves may still hold one in an edited surface tile
+      if ((ov.ore === "iron" || ov.ore === "diamond") && this.layer === "surface") return { ...ov, ore: undefined };
       return ov;
     }
     const cx = Math.floor(x / CHUNK);
@@ -235,7 +250,10 @@ export class World {
   }
 
   set(x: number, y: number, tile: Tile) {
-    this.changes[key(x, y)] = tile;
+    const k = key(x, y);
+    this.changes[k] = tile;
+    if (tile.torch) this.torches.add(k);
+    else this.torches.delete(k);
   }
 
   walkable(x: number, y: number): boolean {

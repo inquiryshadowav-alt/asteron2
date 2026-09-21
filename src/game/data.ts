@@ -2,7 +2,7 @@
 // Pure data — no rendering, no DOM.
 
 export type TileType = "grass" | "dirt" | "sand" | "water" | "stone" | "farmland" | "cave";
-export type Ore = "iron" | "diamond";
+export type Ore = "iron" | "diamond" | "coal";
 export type ObjKind =
   | "tree"
   | "mountain"
@@ -31,6 +31,8 @@ export interface Tile {
   obj?: ObjKind | undefined;
   /** world-time seconds when a crop was planted */
   pt?: number | undefined;
+  /** a torch is mounted on this tile (on the ground, or on a block / wall) */
+  torch?: boolean | undefined;
 }
 
 export const TILE_COLORS: Record<TileType, [string, string]> = {
@@ -146,6 +148,8 @@ export interface ItemDef {
   food?: number;
   tool?: { type: ToolType; tier: Tier };
   seed?: boolean;
+  /** placed as a light source on a tile, not as a block */
+  torch?: boolean;
 }
 
 const HOE_ART = new Set<Tier>(["wood", "stone", "iron", "diamond"]);
@@ -188,6 +192,8 @@ const list: ItemDef[] = [
   { id: "bed", name: "Sleeping Tube", color: "#7fd7f0", stack: 1, place: "bed", icon: "bed" },
   { id: "door", name: "Wooden Door", color: "#a3762f", stack: 4, place: "door_closed", icon: "door" },
   { id: "stick", name: "Stick", color: "#a3762f", stack: 64, icon: "stick" },
+  { id: "coal", name: "Coal", color: "#2b2b33", stack: 64, icon: "coal" },
+  { id: "torch", name: "Torch", color: "#f5a623", stack: 64, icon: "torch", torch: true },
 ];
 
 (["wood", "stone", "iron", "diamond"] as Tier[]).forEach((t) => {
@@ -219,6 +225,7 @@ export const RECIPES: Recipe[] = [
   { id: "diamond_block", result: "diamond_block", count: 1, cat: "Materials", need: [{ id: "diamond", n: 9 }] },
   { id: "bed", result: "bed", count: 1, cat: "Comfort", need: [{ id: "settings", n: 2 }, { id: "iron", n: 2 }] },
   { id: "door", result: "door", count: 1, cat: "Comfort", need: [{ id: "wood", n: 4 }] },
+  { id: "torch", result: "torch", count: 4, cat: "Comfort", need: [{ id: "coal", n: 1 }, { id: "stick", n: 1 }] },
   { id: "seeds", result: "seeds", count: 2, cat: "Food", need: [{ id: "wheat", n: 1 }] },
 ];
 
@@ -233,12 +240,15 @@ export const RECIPES: Recipe[] = [
 });
 
 /** minimum pickaxe tier level required to mine a material */
-export const MINE_REQ = { stone: 1, iron: 2, diamond: 3 };
+export const MINE_REQ = { stone: 1, coal: 1, iron: 2, diamond: 3 };
 
 // ---------- tool durability ----------
 
 /** how many uses a tool survives, by material */
-export const TOOL_USES: Record<Tier, number> = { wood: 5, stone: 9, iron: 12, diamond: 20 };
+export const TOOL_USES: Record<Tier, number> = { wood: 12, stone: 9, iron: 27, diamond: 40 };
+
+/** what the numbers were before the rebalance; used to carry old saves over */
+export const LEGACY_TOOL_USES: Record<Tier, number> = { wood: 5, stone: 9, iron: 12, diamond: 20 };
 
 /** max durability of an item, or undefined when it isn't a tool */
 export function maxDurability(id: string): number | undefined {

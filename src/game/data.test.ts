@@ -7,7 +7,7 @@ const TYPES = ["pickaxe", "axe", "sword", "hoe"];
 
 describe("tool durability", () => {
   it("gives every tool the uses for its material", () => {
-    expect(TOOL_USES).toEqual({ wood: 5, stone: 9, iron: 12, diamond: 20 });
+    expect(TOOL_USES).toEqual({ wood: 12, stone: 9, iron: 27, diamond: 40 });
     for (const tier of TIERS) {
       for (const type of TYPES) expect(maxDurability(`${tier}_${type}`), `${tier}_${type}`).toBe(TOOL_USES[tier]);
     }
@@ -20,9 +20,9 @@ describe("tool durability", () => {
   });
 
   it("treats tools without a stored value as brand new and clamps bad values", () => {
-    expect(usesLeft({ id: "iron_axe" })).toBe(12);
+    expect(usesLeft({ id: "iron_axe" })).toBe(27);
     expect(usesLeft({ id: "iron_axe", dur: 7 })).toBe(7);
-    expect(usesLeft({ id: "iron_axe", dur: 99 })).toBe(12);
+    expect(usesLeft({ id: "iron_axe", dur: 99 })).toBe(27);
     expect(usesLeft({ id: "iron_axe", dur: -3 })).toBe(0);
     expect(usesLeft({ id: "wood", dur: 3 })).toBeUndefined();
   });
@@ -47,5 +47,21 @@ describe("tool art", () => {
   it.each(TIERS)("the %s hoe has its own sprite", (tier) => {
     expect(ITEMS[`${tier}_hoe`]!.icon).toBe(`${tier}_hoe`);
     expect(SPRITE_URLS[`${tier}_hoe`]).toBeTruthy();
+  });
+});
+
+describe("torches and coal", () => {
+  it("have inventory icons that exist", () => {
+    for (const id of ["torch", "coal"]) {
+      expect(ITEMS[id]!.icon, id).toBe(id);
+      expect(SPRITE_URLS[id], id).toBeTruthy();
+    }
+  });
+
+  it("are crafted from one coal and one stick", async () => {
+    const { RECIPES } = await import("./data");
+    const r = RECIPES.find((x) => x.result === "torch")!;
+    expect(r.need).toEqual([{ id: "coal", n: 1 }, { id: "stick", n: 1 }]);
+    expect(r.count).toBeGreaterThan(1);
   });
 });

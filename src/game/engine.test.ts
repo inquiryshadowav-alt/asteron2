@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Game } from "./engine";
+import { DAY_LEN, Game, TORCH_RADIUS } from "./engine";
 import { World, type WorldSave } from "./world";
 
 // The engine only touches the canvas through getContext, so a stub is enough for logic tests.
@@ -96,7 +96,7 @@ describe("respawn", () => {
 });
 
 describe("sleeping", () => {
-  const DAY = 300;
+  const DAY = DAY_LEN;
   function sleepAt(time: number) {
     const g = makeGame();
     g.time = time;
@@ -238,20 +238,20 @@ describe("tool durability in play", () => {
     g.give("iron_sword", 1);
     g.give("diamond_hoe", 1);
     const dur = (id: string) => g.slots.find((s) => s?.id === id)!.dur;
-    expect([dur("wood_pickaxe"), dur("stone_axe"), dur("iron_sword"), dur("diamond_hoe")]).toEqual([5, 9, 12, 20]);
+    expect([dur("wood_pickaxe"), dur("stone_axe"), dur("iron_sword"), dur("diamond_hoe")]).toEqual([12, 9, 27, 40]);
   });
 
-  it("a wooden pickaxe breaks after 5 blocks", () => {
+  it("a wooden pickaxe breaks after 12 blocks", () => {
     const g = makeGame();
     hold(g, "wood_pickaxe");
     const left: (number | undefined)[] = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 12; i++) {
       g.world.set(6, 5, { t: "stone" });
       mineFor(g);
       expect(g.world.get(6, 5).t).toBe("dirt"); // the block did break
       left.push(g.slots[g.hotbar]?.dur);
     }
-    expect(left).toEqual([4, 3, 2, 1, undefined]);
+    expect(left).toEqual([11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, undefined]);
     expect(g.slots[g.hotbar]).toBeNull();
   });
 
@@ -274,17 +274,17 @@ describe("tool durability in play", () => {
     g.world.set(6, 5, { t: "dirt", obj: "tall_grass" });
     mineFor(g);
     expect(g.world.get(6, 5).obj).toBeUndefined();
-    expect(g.slots[g.hotbar]!.dur).toBe(5);
+    expect(g.slots[g.hotbar]!.dur).toBe(12);
   });
 
-  it("a diamond pickaxe lasts 20 blocks and iron ore counts as one use", () => {
+  it("a diamond pickaxe lasts 40 blocks and iron ore counts as one use", () => {
     const g = makeGame();
     hold(g, "diamond_pickaxe");
     g.world = new World(1234, {}, "under"); // ores only exist in the caves
     g.world.set(6, 5, { t: "stone", ore: "iron" });
     mineFor(g);
     expect(g.countPublic("iron")).toBe(1);
-    expect(g.slots[g.hotbar]!.dur).toBe(19);
+    expect(g.slots[g.hotbar]!.dur).toBe(39);
   });
 
   it("an axe wears when chopping a tree, but bare hands and the wrong tool do not", () => {
@@ -308,7 +308,7 @@ describe("tool durability in play", () => {
     priv(g).input.pressedUse = true;
     priv(g).useLogic(0.016);
     expect(g.world.get(6, 5).t).toBe("farmland");
-    expect(g.slots[g.hotbar]!.dur).toBe(11);
+    expect(g.slots[g.hotbar]!.dur).toBe(26);
   });
 
   it("a sword wears once per hit", () => {
@@ -316,9 +316,9 @@ describe("tool durability in play", () => {
     hold(g, "wood_sword");
     priv(g).wear("sword");
     priv(g).wear("sword");
-    expect(g.slots[g.hotbar]!.dur).toBe(3);
+    expect(g.slots[g.hotbar]!.dur).toBe(10);
     priv(g).wear("pickaxe"); // wrong type: nothing happens
-    expect(g.slots[g.hotbar]!.dur).toBe(3);
+    expect(g.slots[g.hotbar]!.dur).toBe(10);
   });
 
   it("tells the player when a tool breaks", () => {
@@ -341,7 +341,7 @@ describe("tool durability in play", () => {
     expect(g.slots.find((s) => s?.id === "stone_pickaxe")!.dur).toBe(3);
   });
 
-  it("saves and restores durability; older saves get brand new tools", () => {
+  it("saves and restores durability; older saves keep their wear and get the new maximums", () => {
     const store = new Map<string, string>();
     vi.stubGlobal("localStorage", {
       getItem: (k: string) => store.get(k) ?? null,
@@ -354,6 +354,7 @@ describe("tool durability in play", () => {
       g.save();
       const saved = JSON.parse(store.get([...store.keys()].find((k) => k.includes("test"))!)!) as WorldSave;
       expect(saved.inv[2]).toEqual({ id: "iron_pickaxe", n: 1, dur: 7 });
+      expect(saved.toolsV).toBe(2);
 
       const base: WorldSave = {
         seed: 1234,
@@ -369,10 +370,20 @@ describe("tool durability in play", () => {
         hotbarIndex: 0,
       };
       const loaded = new Game(makeCanvas(), { saveId: "t2", seed: 1234, difficulty: "easy", save: base });
-      expect(loaded.slots[0]).toEqual({ id: "iron_pickaxe", n: 1, dur: 7 });
-      expect(loaded.slots[1]).toEqual({ id: "wood_axe", n: 1, dur: 5 });
-      expect(loaded.slots[2]).toEqual({ id: "diamond_sword", n: 1, dur: 20 });
+      // this save predates the rebalance (no toolsV): 7 of 12 uses left becomes 22 of 27
+      expect(loaded.slots[0]).toEqual({ id: "iron_pickaxe", n: 1, dur: 22 });
+      expect(loaded.slots[1]).toEqual({ id: "wood_axe", n: 1, dur: 12 });
+      expect(loaded.slots[2]).toEqual({ id: "diamond_sword", n: 1, dur: 40 });
       expect(loaded.slots[3]).toEqual({ id: "wood", n: 12 });
+
+      // a save made after the rebalance is taken as it is
+      const modern = new Game(makeCanvas(), {
+        saveId: "t3",
+        seed: 1234,
+        difficulty: "easy",
+        save: { ...base, toolsV: 2 },
+      });
+      expect(modern.slots[0]).toEqual({ id: "iron_pickaxe", n: 1, dur: 7 });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -448,6 +459,315 @@ describe("coordinates", () => {
       g.save();
       const saved = JSON.parse(store.get([...store.keys()].find((k) => k.includes("c6"))!)!) as WorldSave;
       expect(saved.origin).toEqual({ x: 10, y: 20 });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ---------- torches, coal, mob deaths, lighting ----------
+
+const mob = (kind: string, x: number, y: number, hp: number) => ({
+  kind,
+  x,
+  y,
+  hp,
+  vx: 0,
+  vy: 0,
+  wander: 0,
+  flee: 0,
+  cool: 0,
+  fuse: 0,
+  flash: false,
+  hurt: 0,
+  bob: 0,
+  cave: false,
+});
+
+/** put an item in the selected hotbar slot */
+function hold(g: Game, id: string, n = 1) {
+  g.slots[g.hotbar] = { id, n };
+}
+const tap = (g: Game) => {
+  priv(g).input.pressedUse = true;
+  priv(g).useLogic(0.016);
+};
+const holdUse = (g: Game, dt = 0.05, frames = 2) => {
+  priv(g).input.held["use"] = true;
+  for (let i = 0; i < frames; i++) priv(g).useLogic(dt);
+  priv(g).input.held["use"] = false;
+};
+
+describe("torches", () => {
+  it("are crafted from a coal and a stick", () => {
+    const g = makeGame();
+    g.give("coal", 1);
+    g.give("stick", 1);
+    expect(g.canCraft("torch")).toBe(true);
+    g.craft("torch");
+    expect(g.countPublic("torch")).toBe(4);
+    expect(g.countPublic("coal")).toBe(0);
+    expect(g.countPublic("stick")).toBe(0);
+  });
+
+  it.each(["grass", "dirt", "sand", "cave"] as const)("can be placed on %s ground", (ground) => {
+    const g = makeGame();
+    hold(g, "torch", 3);
+    g.world.set(6, 5, { t: ground });
+    tap(g);
+    expect(g.world.get(6, 5).torch).toBe(true);
+    expect(g.world.torches.has("6,5")).toBe(true);
+    expect(g.slots[g.hotbar]!.n).toBe(2);
+  });
+
+  it("can be mounted on a block or a stone wall without breaking it", () => {
+    const g = makeGame();
+    hold(g, "torch", 5);
+    g.world.set(6, 5, { t: "grass", obj: "block_stone" });
+    priv(g).input.held["use"] = true; // holding the key must not chip the block away
+    tap(g);
+    priv(g).useLogic(0.5);
+    priv(g).input.held["use"] = false;
+    expect(g.world.get(6, 5).obj).toBe("block_stone");
+    expect(g.world.get(6, 5).torch).toBe(true);
+
+    g.world.set(6, 5, { t: "stone" }); // a natural wall
+    tap(g);
+    expect(g.world.get(6, 5).torch).toBe(true);
+    expect(g.world.get(6, 5).t).toBe("stone");
+  });
+
+  it("cannot be placed on water, trees, ores or where there already is one", () => {
+    const g = makeGame();
+    hold(g, "torch", 9);
+    const attempts: [string, Parameters<typeof g.world.set>[2]][] = [
+      ["water", { t: "water" }],
+      ["tree", { t: "grass", obj: "tree" }],
+      ["ore", { t: "stone", ore: "coal" }],
+      ["crop", { t: "farmland", obj: "crop1" }],
+      ["door", { t: "grass", obj: "door_closed" }],
+      ["torch", { t: "grass", torch: true }],
+    ];
+    for (const [name, tile] of attempts) {
+      g.world.set(6, 5, tile);
+      tap(g);
+      expect(g.slots[g.hotbar]!.n, name).toBe(9); // nothing was used up
+    }
+    expect(g.world.get(6, 5).torch).toBe(true); // the old torch is still the only one
+  });
+
+  it("come back into the bag when mined, leaving the block underneath", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", obj: "block_stone", torch: true });
+    hold(g, "wood", 1); // anything but a torch
+    const before = g.countPublic("torch");
+    holdUse(g);
+    expect(g.countPublic("torch")).toBe(before + 1);
+    expect(g.world.get(6, 5).torch).toBeUndefined();
+    expect(g.world.get(6, 5).obj).toBe("block_stone");
+    expect(g.world.torches.has("6,5")).toBe(false);
+  });
+
+  it("are not picked up again while a torch is in hand", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", torch: true });
+    hold(g, "torch", 2);
+    holdUse(g, 0.05, 6);
+    expect(g.world.get(6, 5).torch).toBe(true);
+  });
+
+  it("keep monsters from spawning in their light", () => {
+    const g = makeGame();
+    g.time = DAY_LEN * 0.9; // night
+    const rnd = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      // with this "random" every try picks the same spot, 14 tiles to the left of the player
+      g.world.set(-9, 5, { t: "grass" });
+      priv(g).trySpawn();
+      expect(priv(g).mobs).toHaveLength(1);
+      priv(g).mobs = [];
+      g.world.set(-9, 5, { t: "grass", torch: true });
+      priv(g).trySpawn();
+      expect(priv(g).mobs).toHaveLength(0);
+    } finally {
+      rnd.mockRestore();
+    }
+  });
+
+  it("are destroyed by a creeper on the surface but not underground", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", torch: true });
+    priv(g).explode(mob("creeper", 5.5, 5.5, 1), 22);
+    expect(g.world.get(6, 5).torch).toBeUndefined();
+    expect(g.world.torches.size).toBe(0);
+
+    g.world = new World(1234, {}, "under");
+    g.world.set(6, 5, { t: "cave", torch: true });
+    priv(g).explode(mob("creeper", 5.5, 5.5, 1), 22);
+    expect(g.world.get(6, 5).torch).toBe(true);
+  });
+
+  it("light up a radius of a few tiles", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", torch: true });
+    expect(TORCH_RADIUS).toBeGreaterThanOrEqual(3);
+    expect(priv(g).nearTorch(6.5, 5.5 + TORCH_RADIUS - 0.5, TORCH_RADIUS)).toBe(true);
+    expect(priv(g).nearTorch(6.5, 5.5 + TORCH_RADIUS + 2, TORCH_RADIUS)).toBe(false);
+  });
+});
+
+describe("coal", () => {
+  it("is mined with any pickaxe, drops coal and costs one use", () => {
+    const g = makeGame();
+    g.slots[g.hotbar] = { id: "wood_pickaxe", n: 1, dur: 12 };
+    g.world.set(6, 5, { t: "stone", ore: "coal" });
+    holdUse(g, 0.5, 4); // just long enough for the ore; the bare stone left behind is a separate block
+    expect(g.countPublic("coal")).toBe(1);
+    expect(g.world.get(6, 5).ore).toBeUndefined();
+    expect(g.slots[g.hotbar]!.dur).toBe(11);
+  });
+
+  it("does not need a better pickaxe than wood, unlike iron", () => {
+    const g = makeGame();
+    g.world = new World(1234, {}, "under");
+    g.slots[g.hotbar] = { id: "wood_pickaxe", n: 1, dur: 12 };
+    g.world.set(6, 5, { t: "stone", ore: "iron" });
+    holdUse(g, 0.5, 8);
+    expect(g.world.get(6, 5).ore).toBe("iron");
+    expect(g.countPublic("iron")).toBe(0);
+  });
+});
+
+describe("mob deaths", () => {
+  it("drop their loot and burst into pixels that fade away", () => {
+    const g = makeGame();
+    priv(g).mobs.push(mob("insect", 6.5, 5.5, 1));
+    const meat = g.countPublic("meat");
+    holdUse(g, 0.05, 1);
+    expect(priv(g).mobs).toHaveLength(0);
+    expect(g.countPublic("meat")).toBe(meat + 2);
+    expect(g.particles.length).toBeGreaterThan(15);
+    for (let i = 0; i < 40; i++) priv(g).updateParticles(0.05);
+    expect(g.particles).toHaveLength(0);
+  });
+
+  it.each(["insect", "hover", "builder", "corrupted", "phantom", "electric", "creeper"])(
+    "have an effect for the %s",
+    (kind) => {
+      const g = makeGame();
+      priv(g).deathFx(mob(kind, 5.5, 5.5, 0));
+      expect(g.particles.length).toBeGreaterThan(15);
+      for (const p of g.particles) {
+        expect(p.color).toMatch(/^#[0-9a-f]{6}$/);
+        expect(p.life).toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it("also happen when a creeper blows up", () => {
+    const g = makeGame();
+    priv(g).explode(mob("creeper", 5.5, 5.5, 1), 22);
+    expect(g.particles.length).toBeGreaterThan(15);
+  });
+});
+
+describe("days", () => {
+  it("are longer than the old five minutes", () => {
+    expect(DAY_LEN).toBeGreaterThan(300);
+  });
+});
+
+// a canvas context that records what it was asked to do
+function recordingCtx() {
+  const calls: { name: string; args: unknown[] }[] = [];
+  const state: Record<string, unknown> = {};
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_t, k: string) => {
+        if (k in state) return state[k];
+        return (...args: unknown[]) => {
+          calls.push({ name: k, args });
+          return k === "createRadialGradient" || k === "createLinearGradient" ? { addColorStop() {} } : undefined;
+        };
+      },
+      set: (_t, k: string, v) => {
+        state[k] = v;
+        calls.push({ name: "set:" + k, args: [v] });
+        return true;
+      },
+    },
+  ) as unknown as CanvasRenderingContext2D;
+  return { ctx, calls };
+}
+
+describe("torch light", () => {
+  function setup() {
+    const main = recordingCtx();
+    const layer = recordingCtx();
+    vi.stubGlobal("document", { createElement: () => ({ width: 0, height: 0, getContext: () => layer.ctx }) });
+    const canvas = {
+      getContext: () => main.ctx,
+      width: 640,
+      height: 480,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 640, height: 480 }),
+    } as unknown as HTMLCanvasElement;
+    const g = new Game(canvas, { saveId: "light", seed: 1234, difficulty: "easy", save: null });
+    g.x = 5.5;
+    g.y = 5.5;
+    return { g, main, layer };
+  }
+  const holes = (calls: { name: string; args: unknown[] }[]) =>
+    calls.filter((c) => c.name === "set:globalCompositeOperation" && c.args[0] === "destination-out").length;
+
+  it("cut holes in the night and the cave darkness, with a warm glow", () => {
+    const { g, main, layer } = setup();
+    try {
+      g.world.set(7, 5, { t: "grass", torch: true });
+      g.world.set(8, 6, { t: "grass", torch: true });
+      priv(g).drawDarkness(main.ctx, 640, 480, 30, 0, 0, 0.5, false);
+      expect(holes(layer.calls)).toBe(1);
+      expect(layer.calls.filter((c) => c.name === "createRadialGradient")).toHaveLength(2); // one hole per torch
+      expect(main.calls.some((c) => c.name === "drawImage")).toBe(true);
+      expect(main.calls.some((c) => c.name === "set:globalCompositeOperation" && c.args[0] === "lighter")).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("are not needed in daylight and don't glow without a torch", () => {
+    const { g, main, layer } = setup();
+    try {
+      priv(g).drawDarkness(main.ctx, 640, 480, 30, 0, 0, 0.5, true); // a cave, no torches
+      expect(layer.calls.filter((c) => c.name === "createRadialGradient")).toHaveLength(1); // just the player's circle
+      expect(main.calls.some((c) => c.name === "set:globalCompositeOperation" && c.args[0] === "lighter")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("switch off while falling asleep", () => {
+    const { g, main, layer } = setup();
+    try {
+      g.world.set(7, 5, { t: "grass", torch: true });
+      g.sleeping = 1;
+      priv(g).drawDarkness(main.ctx, 640, 480, 30, 0, 0, 0.95, false);
+      expect(layer.calls.filter((c) => c.name === "createRadialGradient")).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("render a whole frame with torches, coal ore and a death burst without errors", () => {
+    const { g, main } = setup();
+    try {
+      g.time = DAY_LEN * 0.9; // night
+      g.world.set(7, 5, { t: "grass", torch: true });
+      g.world.set(8, 5, { t: "stone", obj: "block_stone", torch: true });
+      g.world.set(6, 6, { t: "stone", ore: "coal" });
+      priv(g).deathFx(mob("phantom", 5.5, 5.5, 0));
+      expect(() => priv(g).render()).not.toThrow();
+      expect(main.calls.some((c) => c.name === "fillRect")).toBe(true);
     } finally {
       vi.unstubAllGlobals();
     }

@@ -1,6 +1,7 @@
 // AUTO-GENERATED: bundled sprite images (shipped inside the build).
 import a_bed from "./assets/bed.png";
 import a_builder from "./assets/builder.png";
+import a_coal from "./assets/coal.png";
 import a_corrupted from "./assets/corrupted.png";
 import a_creeper from "./assets/creeper.png";
 import a_diamond_axe from "./assets/diamond_axe.png";
@@ -35,6 +36,7 @@ import a_stone_axe from "./assets/stone_axe.png";
 import a_stone_hoe from "./assets/stone_hoe.png";
 import a_stone_pickaxe from "./assets/stone_pickaxe.png";
 import a_stone_sword from "./assets/stone_sword.png";
+import a_torch from "./assets/torch.png";
 import a_wheat from "./assets/wheat.png";
 import a_wood_axe from "./assets/wood_axe.png";
 import a_wood_hoe from "./assets/wood_hoe.png";
@@ -44,6 +46,7 @@ import a_wood_sword from "./assets/wood_sword.png";
 export const SPRITE_URLS: Record<string, string> = {
   bed: a_bed,
   builder: a_builder,
+  coal: a_coal,
   corrupted: a_corrupted,
   creeper: a_creeper,
   diamond_axe: a_diamond_axe,
@@ -78,6 +81,7 @@ export const SPRITE_URLS: Record<string, string> = {
   stone_hoe: a_stone_hoe,
   stone_pickaxe: a_stone_pickaxe,
   stone_sword: a_stone_sword,
+  torch: a_torch,
   wheat: a_wheat,
   wood_axe: a_wood_axe,
   wood_hoe: a_wood_hoe,
