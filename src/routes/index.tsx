@@ -23,6 +23,13 @@ export const Route = createFileRoute("/")({
 
 type Screen = "menu" | "worlds" | "create" | "howto";
 
+/** short, locale-aware date for a world card ("Sep 22" or, past a year, "Sep 22, 2025") */
+function formatDate(ts: number): string {
+  const d = new Date(ts);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: sameYear ? undefined : "numeric" });
+}
+
 function Home() {
   const nav = useNavigate();
   const [screen, setScreen] = useState<Screen>("menu");
@@ -32,6 +39,12 @@ function Home() {
   const [seedText, setSeedText] = useState("");
 
   useEffect(() => setWorlds(listWorlds()), [screen]);
+
+  function askDelete(w: WorldMeta) {
+    if (!window.confirm(`Delete "${w.name}"? This can't be undone.`)) return;
+    deleteWorld(w.id);
+    setWorlds(listWorlds());
+  }
 
   function create() {
     const seed = seedText.trim()
@@ -51,50 +64,59 @@ function Home() {
   return (
     <main className="game-shell">
       <div className="pixel-panel w-full max-w-lg">
-        <h1 className="title">BLOCKCRAFT 2D</h1>
-        <p className="subtitle">mine · craft · build · survive</p>
+        <div className="brand">
+          <div className="logo-block" aria-hidden="true" />
+          <div>
+            <h1 className="title">BLOCKCRAFT 2D</h1>
+            <p className="subtitle">mine · craft · build · survive</p>
+          </div>
+        </div>
 
         {screen === "menu" && (
           <div className="stack">
-            <button className="btn primary" onClick={() => setScreen("worlds")}>
-              Play
+            <button className="btn primary big" onClick={() => setScreen("worlds")}>
+              ▶ Play
             </button>
             <button className="btn" onClick={() => setScreen("create")}>
-              Create World
+              ＋ Create World
             </button>
             <button className="btn" onClick={() => setScreen("howto")}>
-              How to Play
+              ❔ How to Play
             </button>
           </div>
         )}
 
         {screen === "worlds" && (
           <div className="stack">
-            <h2 className="sect">Your Worlds</h2>
-            {worlds.length === 0 && <p className="muted">No worlds yet. Create one!</p>}
-            {worlds.map((w) => (
-              <div key={w.id} className="row">
-                <button
-                  className="btn grow"
-                  onClick={() => nav({ to: "/play", search: { id: w.id } })}
-                >
-                  {w.name}
-                  <span className="tag">{w.difficulty}</span>
-                </button>
-                <button
-                  className="btn danger"
-                  aria-label={`Delete ${w.name}`}
-                  onClick={() => {
-                    deleteWorld(w.id);
-                    setWorlds(listWorlds());
-                  }}
-                >
-                  X
-                </button>
+            <h2 className="sect">Your Worlds{worlds.length > 0 ? ` (${worlds.length})` : ""}</h2>
+            {worlds.length === 0 && (
+              <p className="muted empty">No worlds yet — create one to start playing.</p>
+            )}
+            {worlds.length > 0 && (
+              <div className="world-list">
+                {worlds.map((w) => (
+                  <div key={w.id} className="world-card">
+                    <button className="world-main" onClick={() => nav({ to: "/play", search: { id: w.id } })}>
+                      <span className={"world-icon " + w.difficulty} aria-hidden="true">
+                        {w.difficulty === "hard" ? "☠" : "⛏"}
+                      </span>
+                      <span className="world-info">
+                        <span className="world-name">{w.name}</span>
+                        <span className="world-meta">
+                          <span className={"badge " + w.difficulty}>{w.difficulty}</span>
+                          <span className="world-date">{formatDate(w.created)}</span>
+                        </span>
+                      </span>
+                    </button>
+                    <button className="btn danger small" aria-label={`Delete ${w.name}`} onClick={() => askDelete(w)}>
+                      ✕
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
             <button className="btn primary" onClick={() => setScreen("create")}>
-              + New World
+              ＋ New World
             </button>
             <button className="btn ghost" onClick={() => setScreen("menu")}>
               Back
@@ -123,13 +145,13 @@ function Home() {
                 className={"btn grow" + (difficulty === "easy" ? " primary" : "")}
                 onClick={() => setDifficulty("easy")}
               >
-                Easy
+                🌱 Easy
               </button>
               <button
                 className={"btn grow" + (difficulty === "hard" ? " primary" : "")}
                 onClick={() => setDifficulty("hard")}
               >
-                Hard
+                ☠ Hard
               </button>
             </div>
             <p className="muted">
@@ -137,8 +159,8 @@ function Home() {
                 ? "Fewer night mobs, slower hunger, gentler hits."
                 : "Swarms of night mobs, fast hunger, heavy damage."}
             </p>
-            <button className="btn primary" onClick={create}>
-              Create &amp; Play
+            <button className="btn primary big" onClick={create}>
+              ▶ Create &amp; Play
             </button>
             <button className="btn ghost" onClick={() => setScreen("menu")}>
               Back
