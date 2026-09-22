@@ -21,6 +21,32 @@ export const Route = createFileRoute("/play")({
 
 const CATS: RecipeCategory[] = ["Tools", "Materials", "Food", "Comfort"];
 
+/** true when the browser's main pointer is a finger (touch/pen), not a mouse or trackpad */
+function usePointerIsCoarse() {
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    const update = () => setCoarse(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return coarse;
+}
+
+/** the viewport is small enough that keyboard play is impractical (a phone, or a small tablet) */
+function useSmallScreen() {
+  const [small, setSmall] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 900px)");
+    const update = () => setSmall(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return small;
+}
+
 function Play() {
   const { id } = Route.useSearch();
   const nav = useNavigate();
@@ -29,6 +55,11 @@ function Play() {
   const [hud, setHud] = useState<Hud | null>(null);
   const [cat, setCat] = useState<RecipeCategory>("Tools");
   const [err, setErr] = useState("");
+  // on-screen buttons only where a finger is the main input AND the screen is small; everyone else
+  // gets the keyboard, so nobody ends up with buttons too cramped to use or a control scheme that
+  // doesn't match their device
+  const touchControls = usePointerIsCoarse() && useSmallScreen();
+  const [showHint, setShowHint] = useState(false);
 
   useEffect(() => {
     const meta = listWorlds().find((w) => w.id === id);
@@ -61,8 +92,12 @@ function Play() {
     fit();
     window.addEventListener("resize", fit);
     g.start();
+    // a quick reminder of the controls, every time a world is opened
+    setShowHint(true);
+    const hintTimer = window.setTimeout(() => setShowHint(false), 2800);
     return () => {
       window.removeEventListener("resize", fit);
+      window.clearTimeout(hintTimer);
       g.stop();
       gameRef.current = null;
     };
@@ -143,15 +178,27 @@ function Play() {
               </button>
             </div>
 
-            <div className="pad">
-              <div className="dpad">
-                <PadBtn label="▲" cls="up" on={(v) => hold("up", v)} />
-                <PadBtn label="◀" cls="left" on={(v) => hold("left", v)} />
-                <PadBtn label="▶" cls="right" on={(v) => hold("right", v)} />
-                <PadBtn label="▼" cls="down" on={(v) => hold("down", v)} />
+            {touchControls && (
+              <div className="pad">
+                <div className="dpad">
+                  <PadBtn label="▲" cls="up" on={(v) => hold("up", v)} />
+                  <PadBtn label="◀" cls="left" on={(v) => hold("left", v)} />
+                  <PadBtn label="▶" cls="right" on={(v) => hold("right", v)} />
+                  <PadBtn label="▼" cls="down" on={(v) => hold("down", v)} />
+                </div>
+                <PadBtn label="A" cls="action" on={(v) => hold("use", v)} />
               </div>
-              <PadBtn label="A" cls="action" on={(v) => hold("use", v)} />
-            </div>
+            )}
+
+            {showHint && (
+              <div className="controls-hint">
+                {touchControls ? (
+                  <>Arrows to move · Tap A to place · Hold A to break</>
+                ) : (
+                  <>Arrow keys to move · Space or click to place · Hold to break</>
+                )}
+              </div>
+            )}
 
             {hud.invOpen && (
               <div className="overlay">
@@ -304,16 +351,23 @@ function PadBtn({
   cls: string;
   on: (down: boolean) => void;
 }) {
+  // tracked ourselves rather than relying on the CSS :active pseudo-class, which touch browsers
+  // apply inconsistently, so the pressed look is always in sync with what the game receives
+  const [down, setDown] = useState(false);
+  const press = (v: boolean) => {
+    setDown(v);
+    on(v);
+  };
   return (
     <button
-      className={"pbtn " + cls}
+      className={"pbtn " + cls + (down ? " down" : "")}
       onPointerDown={(e) => {
         e.preventDefault();
-        on(true);
+        press(true);
       }}
-      onPointerUp={() => on(false)}
-      onPointerLeave={() => on(false)}
-      onPointerCancel={() => on(false)}
+      onPointerUp={() => press(false)}
+      onPointerLeave={() => press(false)}
+      onPointerCancel={() => press(false)}
     >
       {label}
     </button>

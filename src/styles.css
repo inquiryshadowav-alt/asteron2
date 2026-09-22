@@ -221,11 +221,16 @@
 }
 
 /* ---- play screen ---- */
-.play-root { height: 100vh; background: #0d1014; font-family: ui-monospace, "Courier New", monospace; color: var(--bc-text); }
+.play-root {
+  height: 100vh; background: #0d1014; font-family: ui-monospace, "Courier New", monospace; color: var(--bc-text);
+}
 .stage { position: relative; width: 100%; height: 100vh; overflow: hidden; }
 .canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 
-.hud-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; gap: 10px; align-items: flex-start; }
+.hud-top {
+  position: absolute; top: max(8px, env(safe-area-inset-top, 0px)); left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px)); display: flex; gap: 10px; align-items: flex-start;
+}
 .bars { display: flex; flex-direction: column; gap: 4px; }
 .bar { width: 120px; height: 12px; background: #0008; border: 2px solid var(--bc-edge); }
 .fill { display: block; height: 100%; }
@@ -241,7 +246,11 @@
   background: #000b; border: 2px solid var(--bc-edge); padding: 6px 10px; font-size: 12px;
 }
 
-.hotbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 4px; }
+.hotbar {
+  position: absolute; bottom: max(8px, env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
+  display: flex; gap: clamp(2px, 0.6vw, 4px); max-width: calc(100vw - 12px); overflow-x: auto; scrollbar-width: none;
+}
+.hotbar::-webkit-scrollbar { display: none; }
 .cell {
   position: relative; width: 40px; height: 40px; background: #1c212ac9;
   border: 3px solid var(--bc-edge); cursor: pointer; color: var(--bc-text); font-size: 10px;
@@ -256,18 +265,85 @@
 .dur { position: absolute; left: 4px; right: 4px; bottom: 3px; height: 5px; display: block; background: #000c; border: 1px solid #000; }
 .dur > span { display: block; height: 100%; }
 
-.pad { position: absolute; bottom: 60px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 14px; pointer-events: none; }
-.pad > * { pointer-events: auto; }
-.dpad { position: relative; width: 132px; height: 132px; }
-.pbtn {
-  width: 44px; height: 44px; font-size: 16px; color: var(--bc-text);
-  background: #3a4150cc; border: 3px solid var(--bc-edge); cursor: pointer; touch-action: none;
+/*
+ * On-screen controls: every dimension is clamp()ed to the viewport (vmin-based) so the whole pad
+ * scales down together on a small phone instead of one button getting cramped or clipped, and
+ * bottom/side spacing respects the safe area on notched devices.
+ */
+.pad {
+  position: absolute;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  left: 0; right: 0;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  padding: 0 max(14px, env(safe-area-inset-left, 0px)) 0 max(14px, env(safe-area-inset-right, 0px));
+  pointer-events: none;
 }
-.dpad .up { position: absolute; left: 44px; top: 0; }
-.dpad .down { position: absolute; left: 44px; top: 88px; }
-.dpad .left { position: absolute; left: 0; top: 44px; }
-.dpad .right { position: absolute; left: 88px; top: 44px; }
-.pbtn.action { width: 74px; height: 74px; border-radius: 50%; background: #5aa02ccc; align-self: flex-end; }
+.pad > * { pointer-events: auto; }
+.dpad {
+  position: relative;
+  width: clamp(108px, 32vmin, 150px);
+  height: clamp(108px, 32vmin, 150px);
+  background: #12151dbb;
+  border: 2px solid var(--bc-edge);
+  border-radius: 16px;
+  box-shadow: 0 4px 14px #0007;
+}
+.pbtn {
+  --s: clamp(36px, 10.5vmin, 50px);
+  width: var(--s); height: var(--s);
+  font-size: clamp(14px, 4vmin, 18px);
+  color: var(--bc-text);
+  background: #3a4150dd;
+  border: 2px solid var(--bc-edge);
+  border-radius: 10px;
+  cursor: pointer; touch-action: none; user-select: none;
+  box-shadow: 0 2px 0 #00000066, inset 0 1px 0 #ffffff14;
+  transition: transform 60ms ease, background 60ms ease, box-shadow 60ms ease;
+}
+.pbtn.down {
+  background: #566079ee;
+  transform: translateY(2px) scale(0.94);
+  box-shadow: inset 0 2px 4px #0007;
+}
+.dpad .up { position: absolute; left: 50%; top: 6%; transform: translateX(-50%); }
+.dpad .down { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); }
+.dpad .left { position: absolute; left: 6%; top: 50%; transform: translateY(-50%); }
+.dpad .right { position: absolute; right: 6%; top: 50%; transform: translateY(-50%); }
+.pbtn.action {
+  --s: clamp(64px, 19vmin, 92px);
+  width: var(--s); height: var(--s);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #7ac640, #4c8a22);
+  border: 2px solid #2f5c14;
+  font-weight: 700;
+  align-self: flex-end;
+  box-shadow: 0 4px 0 #2f5c14, 0 6px 14px #0008;
+}
+.pbtn.action.down {
+  background: radial-gradient(circle at 35% 30%, #6bb136, #3f7a1c);
+  box-shadow: 0 1px 0 #2f5c14, inset 0 2px 6px #0006;
+}
+
+@keyframes hint-fade {
+  0% { opacity: 0; transform: translate(-50%, -6px); }
+  10%, 80% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -6px); }
+}
+.controls-hint {
+  position: absolute;
+  top: calc(56px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  max-width: min(92vw, 480px);
+  text-align: center;
+  padding: 7px 14px;
+  font-size: 12px;
+  background: #000b;
+  border: 2px solid var(--bc-edge);
+  border-radius: 8px;
+  color: var(--bc-text);
+  pointer-events: none;
+  animation: hint-fade 2.8s ease forwards;
+}
 
 .overlay { position: absolute; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; padding: 12px; }
 .grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }

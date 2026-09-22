@@ -725,6 +725,20 @@ export class Game {
       return;
     }
 
+    // eating always wins over whatever is in front of the player (a block, a crop, water, bare
+    // ground...) so a food item in hand never gets stuck trying to mine or harvest instead
+    if (pressed && selDef?.food) {
+      if (this.hunger >= MAX_HUNGER) this.say("Not hungry");
+      else {
+        this.hunger = Math.min(MAX_HUNGER, this.hunger + selDef.food);
+        this.take(sel!.id, 1);
+        this.say("Yum!");
+      }
+      this.mining = 0;
+      this.miningKey = "";
+      return;
+    }
+
     // mining (hold)
     // torches: stand one on open ground or mount it on a block / wall. This comes before mining so a
     // torch in hand goes onto a block instead of chipping it away.
@@ -797,15 +811,6 @@ export class Game {
     if (selDef?.place && !tile.obj && tile.t !== "water") {
       this.world.set(tx, ty, { ...tile, obj: selDef.place });
       this.take(sel!.id, 1);
-      return;
-    }
-    if (selDef?.food) {
-      if (this.hunger >= MAX_HUNGER) this.say("Not hungry");
-      else {
-        this.hunger = Math.min(MAX_HUNGER, this.hunger + selDef.food);
-        this.take(sel!.id, 1);
-        this.say("Yum!");
-      }
     }
   }
 

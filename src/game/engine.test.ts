@@ -841,3 +841,73 @@ describe("torch light", () => {
     }
   });
 });
+
+describe("eating", () => {
+  it("eats food while facing bare ground", () => {
+    const g = makeGame();
+    hold(g, "meat", 2);
+    g.hunger = 50;
+    g.world.set(6, 5, { t: "grass" });
+    tap(g);
+    expect(g.hunger).toBeGreaterThan(50);
+    expect(g.slots[g.hotbar]!.n).toBe(1);
+  });
+
+  it("eats food while facing a placed block, instead of mining it", () => {
+    const g = makeGame();
+    hold(g, "meat", 1);
+    g.hunger = 50;
+    g.world.set(6, 5, { t: "grass", obj: "block_stone" });
+    tap(g);
+    expect(g.hunger).toBeGreaterThan(50);
+    expect(g.slots[g.hotbar]).toBeNull(); // the meat was eaten
+    expect(g.world.get(6, 5).obj).toBe("block_stone"); // the block was left alone
+  });
+
+  it("eats food while facing a crop, instead of harvesting it", () => {
+    const g = makeGame();
+    hold(g, "meat", 1);
+    g.hunger = 50;
+    g.world.set(6, 5, { t: "farmland", obj: "crop3" }); // ripe: would normally be harvested
+    tap(g);
+    expect(g.hunger).toBeGreaterThan(50);
+    expect(g.slots[g.hotbar]).toBeNull();
+    expect(g.world.get(6, 5).obj).toBe("crop3"); // still there, unharvested
+    expect(g.countPublic("wheat")).toBe(0);
+  });
+
+  it("eats food while facing water", () => {
+    const g = makeGame();
+    hold(g, "meat", 1);
+    g.hunger = 50;
+    g.world.set(6, 5, { t: "water" });
+    tap(g);
+    expect(g.hunger).toBeGreaterThan(50);
+    expect(g.slots[g.hotbar]).toBeNull();
+  });
+
+  it("eats food even while holding an ore or a mineable stone tile", () => {
+    const g = makeGame();
+    hold(g, "meat", 1);
+    g.hunger = 50;
+    g.world = new World(1234, {}, "under");
+    g.world.set(6, 5, { t: "stone", ore: "iron" });
+    tap(g);
+    expect(g.hunger).toBeGreaterThan(50);
+    expect(g.world.get(6, 5).ore).toBe("iron"); // untouched
+  });
+
+  it("does nothing when not hungry, and does not eat non-food items", () => {
+    const g = makeGame();
+    hold(g, "meat", 1);
+    g.hunger = 100;
+    g.world.set(6, 5, { t: "grass" });
+    tap(g);
+    expect(g.slots[g.hotbar]!.n).toBe(1); // nothing eaten
+
+    hold(g, "wood_pickaxe", 1);
+    g.world.set(6, 5, { t: "grass", obj: "block_stone" });
+    tap(g);
+    expect(g.world.get(6, 5).obj).toBe("block_stone"); // a single tap does not start mining either
+  });
+});
