@@ -369,6 +369,19 @@
   box-shadow: 0 1px 0 #2f5c14, inset 0 2px 6px #0006;
 }
 
+/* the desktop / mouse version: available for anyone without a keyboard, but out of the way of
+   people who do have one — smaller, a little translucent until you touch it */
+.pad.compact {
+  bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  opacity: 0.72;
+  transition: opacity 150ms ease;
+}
+.pad.compact:hover,
+.pad.compact:focus-within { opacity: 1; }
+.pad.compact .dpad { width: clamp(64px, 15vmin, 84px); height: clamp(64px, 15vmin, 84px); border-radius: 12px; }
+.pad.compact .pbtn { --s: clamp(22px, 5.2vmin, 28px); font-size: clamp(10px, 2.4vmin, 12px); border-radius: 7px; }
+.pad.compact .pbtn.action { --s: clamp(38px, 9vmin, 48px); font-size: clamp(12px, 2.8vmin, 14px); }
+
 @keyframes hint-fade {
   0% { opacity: 0; transform: translate(-50%, -6px); }
   10%, 80% { opacity: 1; transform: translate(-50%, 0); }

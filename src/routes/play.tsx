@@ -55,9 +55,9 @@ function Play() {
   const [hud, setHud] = useState<Hud | null>(null);
   const [cat, setCat] = useState<RecipeCategory>("Tools");
   const [err, setErr] = useState("");
-  // on-screen buttons only where a finger is the main input AND the screen is small; everyone else
-  // gets the keyboard, so nobody ends up with buttons too cramped to use or a control scheme that
-  // doesn't match their device
+  // the on-screen pad is always available — some desktop visitors have no physical keyboard — but
+  // it only runs full-size where a finger is the main input AND the screen is small; everyone else
+  // (mouse, trackpad, a big screen) gets a smaller, out-of-the-way version instead
   const touchControls = usePointerIsCoarse() && useSmallScreen();
   const [showHint, setShowHint] = useState(false);
 
@@ -178,17 +178,15 @@ function Play() {
               </button>
             </div>
 
-            {touchControls && (
-              <div className="pad">
-                <div className="dpad">
-                  <PadBtn label="▲" cls="up" on={(v) => hold("up", v)} />
-                  <PadBtn label="◀" cls="left" on={(v) => hold("left", v)} />
-                  <PadBtn label="▶" cls="right" on={(v) => hold("right", v)} />
-                  <PadBtn label="▼" cls="down" on={(v) => hold("down", v)} />
-                </div>
-                <PadBtn label="A" cls="action" on={(v) => hold("use", v)} />
+            <div className={"pad" + (touchControls ? "" : " compact")}>
+              <div className="dpad">
+                <PadBtn label="▲" cls="up" on={(v) => hold("up", v)} />
+                <PadBtn label="◀" cls="left" on={(v) => hold("left", v)} />
+                <PadBtn label="▶" cls="right" on={(v) => hold("right", v)} />
+                <PadBtn label="▼" cls="down" on={(v) => hold("down", v)} />
               </div>
-            )}
+              <PadBtn label="A" cls="action" on={(v) => hold("use", v)} />
+            </div>
 
             {showHint && (
               <div className="controls-hint">
