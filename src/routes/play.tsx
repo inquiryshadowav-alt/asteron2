@@ -58,7 +58,12 @@ function Play() {
   // the on-screen pad is always available — some desktop visitors have no physical keyboard — but
   // it only runs full-size where a finger is the main input AND the screen is small; everyone else
   // (mouse, trackpad, a big screen) gets a smaller, out-of-the-way version instead
-  const touchControls = usePointerIsCoarse() && useSmallScreen();
+  // both hooks must always run, every render — short-circuiting with && would skip the second
+  // hook whenever the first is false, changing how many hooks this component calls between
+  // renders (React requires the exact same hooks, in the same order, on every render)
+  const coarsePointer = usePointerIsCoarse();
+  const smallScreen = useSmallScreen();
+  const touchControls = coarsePointer && smallScreen;
   const [showHint, setShowHint] = useState(false);
 
   useEffect(() => {
