@@ -5,7 +5,13 @@ import {
   MINE_REQ,
   OBJ_TALL,
   RECIPES,
+  BARE_HAND_DAMAGE,
+  SWORD_DAMAGE,
+  SWORD_HIT_COOLDOWN,
   TIER_LEVEL,
+  TOOL_ATTACK_DAMAGE,
+  TOOL_HIT_COOLDOWN,
+  WRONG_TOOL_RATE,
   OLD_TOOL_USES,
   TOOLS_VERSION,
   maxDurability,
@@ -60,13 +66,15 @@ interface MobDef {
 }
 
 const MOBS: Record<MobKind, MobDef> = {
-  insect: { hp: 10, speed: 1.1, range: 0, dmg: 0, hostile: false, drop: { id: "meat", n: 2 } },
-  hover: { hp: 12, speed: 1.0, range: 0, dmg: 0, hostile: false, drop: { id: "meat", n: 2 } },
-  builder: { hp: 10, speed: 1.1, range: 0, dmg: 0, hostile: false, drop: { id: "settings", n: 2 } },
-  corrupted: { hp: 20, speed: 1.7, range: 11, dmg: 6, hostile: true },
-  phantom: { hp: 24, speed: 1.5, range: 12, dmg: 5, hostile: true, shoots: true, drop: { id: "stick", n: 1 } },
-  electric: { hp: 14, speed: 2.6, range: 12, dmg: 4, hostile: true, erratic: true },
-  creeper: { hp: 18, speed: 1.5, range: 12, dmg: 22, hostile: true, explodes: true },
+  // hostile HP is set so each sword tier clearly changes the number of hits a fight takes
+  // (see SWORD_DAMAGE): wood grinds it out, diamond drops most of them in half the swings.
+  insect: { hp: 14, speed: 1.1, range: 0, dmg: 0, hostile: false, drop: { id: "meat", n: 2 } },
+  hover: { hp: 14, speed: 1.0, range: 0, dmg: 0, hostile: false, drop: { id: "meat", n: 2 } },
+  builder: { hp: 14, speed: 1.1, range: 0, dmg: 0, hostile: false, drop: { id: "settings", n: 2 } },
+  corrupted: { hp: 48, speed: 1.7, range: 11, dmg: 6, hostile: true },
+  phantom: { hp: 56, speed: 1.5, range: 12, dmg: 5, hostile: true, shoots: true, drop: { id: "stick", n: 1 } },
+  electric: { hp: 38, speed: 2.6, range: 12, dmg: 4, hostile: true, erratic: true },
+  creeper: { hp: 30, speed: 1.5, range: 12, dmg: 22, hostile: true, explodes: true },
 };
 
 interface Mob {
@@ -677,11 +685,15 @@ export class Game {
     const target = this.mobs.find((m) => Math.abs(m.x - (tx + 0.5)) < 0.8 && Math.abs(m.y - (ty + 0.5)) < 0.8);
     if (holding && target) {
       if (this.hitCool <= 0) {
-        this.hitCool = 0.45;
-        const tier = this.toolOf("sword");
-        const dmg = tier ? 4 + TIER_LEVEL[tier] * 3 : 3;
+        // a sword (or bare fists) swings at normal speed; a pickaxe, axe or hoe is a slow, weak
+        // substitute — good for a job, bad for a fight
+        const heldTool = selDef?.tool;
+        const sword = heldTool?.type === "sword" ? heldTool.tier : undefined;
+        const dmg = sword ? SWORD_DAMAGE[sword] : heldTool ? TOOL_ATTACK_DAMAGE[heldTool.tier] : BARE_HAND_DAMAGE;
+        this.hitCool = heldTool && !sword ? TOOL_HIT_COOLDOWN : SWORD_HIT_COOLDOWN;
         target.hp -= dmg;
-        this.wear("sword");
+        if (sword) this.wear("sword");
+        else if (heldTool) this.wear(heldTool.type);
         target.hurt = 0.35;
         target.flee = 1.4;
         const away = Math.atan2(target.y - this.y, target.x - this.x);
@@ -903,17 +915,18 @@ export class Game {
     if (tile.obj) {
       if (tile.obj === "tree") {
         const tier = this.toolOf("axe");
-        return {
-          kind: "obj",
-          rate: tier ? 0.8 + TIER_LEVEL[tier] * 0.5 : 0.35,
-          drop: { id: "wood", n: 3 },
-          tool: tier ? "axe" : undefined,
-        };
+        if (tier) return { kind: "obj", rate: 0.8 + TIER_LEVEL[tier] * 0.5, drop: { id: "wood", n: 3 }, tool: "axe" };
+        // a pickaxe, sword or hoe is clumsy on wood: slower than just using your hands
+        const heldFor = this.slots[this.hotbar];
+        const wrongTool = heldFor ? ITEMS[heldFor.id]?.tool : undefined;
+        return { kind: "obj", rate: wrongTool ? WRONG_TOOL_RATE : 0.35, drop: { id: "wood", n: 3 }, tool: wrongTool?.type };
       }
       if (tile.obj === "mountain") {
         const tier = this.toolOf("pickaxe");
-        if (!tier) return null;
-        return { kind: "obj", rate: 0.4 + TIER_LEVEL[tier] * 0.35, drop: { id: "stone", n: 3 }, tool: "pickaxe" };
+        if (tier) return { kind: "obj", rate: 0.4 + TIER_LEVEL[tier] * 0.35, drop: { id: "stone", n: 3 }, tool: "pickaxe" };
+        const heldFor = this.slots[this.hotbar];
+        const wrongTool = heldFor ? ITEMS[heldFor.id]?.tool : undefined;
+        return { kind: "obj", rate: WRONG_TOOL_RATE, drop: { id: "stone", n: 3 }, tool: wrongTool?.type };
       }
       // tall grass: nearly instant by hand, and the only wild source of seeds
       if (tile.obj === "tall_grass") return { kind: "obj", rate: 12, drop: { id: "seeds", n: 1 } };
@@ -927,12 +940,17 @@ export class Game {
     }
     if (tile.t === "stone") {
       const tier = this.toolOf("pickaxe");
-      if (!tier) return null;
-      const lvl = TIER_LEVEL[tier];
       const need = tile.ore ? MINE_REQ[tile.ore] : MINE_REQ.stone;
-      if (lvl < need) return null;
-      const drop = tile.ore ? { id: tile.ore, n: 1 } : { id: "stone", n: 1 };
-      return { kind: tile.ore ? "ore" : "stone", rate: 0.35 + lvl * 0.3, drop, tool: "pickaxe" };
+      if (tier && TIER_LEVEL[tier] >= need) {
+        const drop = tile.ore ? { id: tile.ore, n: 1 } : { id: "stone", n: 1 };
+        return { kind: tile.ore ? "ore" : "stone", rate: 0.35 + TIER_LEVEL[tier] * 0.3, drop, tool: "pickaxe" };
+      }
+      // ore always needs a proper pickaxe of the right tier; plain stone can still be chipped away
+      // slowly with anything else (or bare hands) instead of being flatly impossible
+      if (tile.ore) return null;
+      const heldFor = this.slots[this.hotbar];
+      const wrongTool = heldFor ? ITEMS[heldFor.id]?.tool : undefined;
+      return { kind: "stone", rate: WRONG_TOOL_RATE, drop: { id: "stone", n: 1 }, tool: wrongTool?.type };
     }
     return null;
   }

@@ -130,6 +130,34 @@ export const BLOCK_DROP: Partial<Record<ObjKind, string>> = {
 export type ToolType = "sword" | "pickaxe" | "axe" | "hoe";
 export type Tier = "wood" | "stone" | "iron" | "diamond";
 export const TIER_LEVEL: Record<Tier, number> = { wood: 1, stone: 2, iron: 3, diamond: 4 };
+
+/**
+ * Sword damage per tier, hand-tuned rather than derived from TIER_LEVEL: each step is a bigger
+ * jump than the last, so a diamond sword clearly cuts down the number of hits a fight takes
+ * compared to wood, not just a little more per swing. Bare hands deal 3.
+ */
+export const SWORD_DAMAGE: Record<Tier, number> = { wood: 8, stone: 12, iron: 17, diamond: 24 };
+export const BARE_HAND_DAMAGE = 3;
+
+/**
+ * Damage when a pickaxe, axe or hoe is swung at a mob instead of a proper sword. It still lands a
+ * hit, and a diamond one still hits harder than a wood one, but every tier is far below a sword of
+ * the same material — and, in the engine, it swings much slower too (see TOOL_HIT_COOLDOWN) — so
+ * reaching for a mining tool in a fight is always a worse choice than drawing a sword.
+ */
+export const TOOL_ATTACK_DAMAGE: Record<Tier, number> = { wood: 3, stone: 5, iron: 7, diamond: 9 };
+
+/** attack cooldown, in seconds: a sword or bare fists swing at normal speed; any other tool is slow */
+export const SWORD_HIT_COOLDOWN = 0.45;
+export const TOOL_HIT_COOLDOWN = 0.85;
+
+/**
+ * Off-tool mining rate: using anything other than the one tool built for a job (a pickaxe on
+ * stone, an axe on wood) still works, but far slower than even bare hands — the wrong tool is
+ * clumsy, not just unhelpful. Ore always still needs a proper pickaxe of the right tier; this only
+ * ever applies to plain stone, mountains and trees.
+ */
+export const WRONG_TOOL_RATE = 0.12;
 export const TIER_COLOR: Record<Tier, string> = {
   wood: "#a3762f",
   stone: "#9a9a9a",
@@ -245,15 +273,16 @@ export const MINE_REQ = { stone: 1, coal: 1, iron: 2, diamond: 3 };
 // ---------- tool durability ----------
 
 /** how many uses a tool survives, by material */
-export const TOOL_USES: Record<Tier, number> = { wood: 12, stone: 18, iron: 27, diamond: 40 };
+export const TOOL_USES: Record<Tier, number> = { wood: 22, stone: 33, iron: 47, diamond: 60 };
 
 /** bumped whenever TOOL_USES changes; saves remember which version their tools were counted in */
-export const TOOLS_VERSION = 3;
+export const TOOLS_VERSION = 4;
 
 /** the tables of earlier versions, so an older save keeps the same amount of wear on its tools (1 = no version stored) */
 export const OLD_TOOL_USES: Record<number, Record<Tier, number>> = {
   1: { wood: 5, stone: 9, iron: 12, diamond: 20 },
   2: { wood: 12, stone: 9, iron: 27, diamond: 40 },
+  3: { wood: 12, stone: 18, iron: 27, diamond: 40 },
 };
 
 /** max durability of an item, or undefined when it isn't a tool */

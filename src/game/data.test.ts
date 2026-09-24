@@ -7,7 +7,7 @@ const TYPES = ["pickaxe", "axe", "sword", "hoe"];
 
 describe("tool durability", () => {
   it("gives every tool the uses for its material", () => {
-    expect(TOOL_USES).toEqual({ wood: 12, stone: 18, iron: 27, diamond: 40 });
+    expect(TOOL_USES).toEqual({ wood: 22, stone: 33, iron: 47, diamond: 60 });
     for (const tier of TIERS) {
       for (const type of TYPES) expect(maxDurability(`${tier}_${type}`), `${tier}_${type}`).toBe(TOOL_USES[tier]);
     }
@@ -20,9 +20,9 @@ describe("tool durability", () => {
   });
 
   it("treats tools without a stored value as brand new and clamps bad values", () => {
-    expect(usesLeft({ id: "iron_axe" })).toBe(27);
+    expect(usesLeft({ id: "iron_axe" })).toBe(47);
     expect(usesLeft({ id: "iron_axe", dur: 7 })).toBe(7);
-    expect(usesLeft({ id: "iron_axe", dur: 99 })).toBe(27);
+    expect(usesLeft({ id: "iron_axe", dur: 99 })).toBe(47);
     expect(usesLeft({ id: "iron_axe", dur: -3 })).toBe(0);
     expect(usesLeft({ id: "wood", dur: 3 })).toBeUndefined();
   });

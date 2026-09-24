@@ -239,7 +239,7 @@ describe("tool durability in play", () => {
   }
   const mineFor = (g: Game) => {
     priv(g).input.held["use"] = true;
-    priv(g).useLogic(4); // long enough to finish any block, even a tree by hand
+    priv(g).useLogic(9); // long enough even for the slow wrong-tool rate
     priv(g).input.held["use"] = false;
   };
 
@@ -250,20 +250,23 @@ describe("tool durability in play", () => {
     g.give("iron_sword", 1);
     g.give("diamond_hoe", 1);
     const dur = (id: string) => g.slots.find((s) => s?.id === id)!.dur;
-    expect([dur("wood_pickaxe"), dur("stone_axe"), dur("iron_sword"), dur("diamond_hoe")]).toEqual([12, 18, 27, 40]);
+    expect([dur("wood_pickaxe"), dur("stone_axe"), dur("iron_sword"), dur("diamond_hoe")]).toEqual([22, 33, 47, 60]);
   });
 
-  it("a wooden pickaxe breaks after 12 blocks", () => {
+  it("a wooden pickaxe breaks after 22 blocks", () => {
     const g = makeGame();
     hold(g, "wood_pickaxe");
     const left: (number | undefined)[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 22; i++) {
       g.world.set(6, 5, { t: "stone" });
       mineFor(g);
       expect(g.world.get(6, 5).t).toBe("dirt"); // the block did break
       left.push(g.slots[g.hotbar]?.dur);
     }
-    expect(left).toEqual([11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, undefined]);
+    const expectedLeft: (number | undefined)[] = [];
+    for (let n = 21; n >= 1; n--) expectedLeft.push(n);
+    expectedLeft.push(undefined);
+    expect(left).toEqual(expectedLeft);
     expect(g.slots[g.hotbar]).toBeNull();
   });
 
@@ -286,31 +289,37 @@ describe("tool durability in play", () => {
     g.world.set(6, 5, { t: "dirt", obj: "tall_grass" });
     mineFor(g);
     expect(g.world.get(6, 5).obj).toBeUndefined();
-    expect(g.slots[g.hotbar]!.dur).toBe(12);
+    expect(g.slots[g.hotbar]!.dur).toBe(22);
   });
 
-  it("a diamond pickaxe lasts 40 blocks and iron ore counts as one use", () => {
+  it("a diamond pickaxe lasts 60 blocks and iron ore counts as one use", () => {
     const g = makeGame();
     hold(g, "diamond_pickaxe");
     g.world = new World(1234, {}, "under"); // ores only exist in the caves
     g.world.set(6, 5, { t: "stone", ore: "iron" });
     mineFor(g);
     expect(g.countPublic("iron")).toBe(1);
-    expect(g.slots[g.hotbar]!.dur).toBe(39);
+    expect(g.slots[g.hotbar]!.dur).toBe(59);
   });
 
-  it("an axe wears when chopping a tree, but bare hands and the wrong tool do not", () => {
+  it("an axe wears when chopping a tree; a pickaxe is slower and wears too; bare hands wear nothing", () => {
     const g = makeGame();
     hold(g, "stone_axe");
     g.world.set(6, 5, { t: "grass", obj: "tree" });
     mineFor(g);
-    expect(g.slots[g.hotbar]!.dur).toBe(17);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.slots[g.hotbar]!.dur).toBe(32);
 
     hold(g, "stone_pickaxe");
     g.world.set(6, 5, { t: "grass", obj: "tree" });
     mineFor(g);
-    expect(g.world.get(6, 5).obj).toBeUndefined(); // still chopped, slowly
-    expect(g.slots[g.hotbar]!.dur).toBe(18); // pickaxe untouched
+    expect(g.world.get(6, 5).obj).toBeUndefined(); // still chopped, just slowly
+    expect(g.slots[g.hotbar]!.dur).toBeLessThan(33); // and the pickaxe itself wears for the trouble
+
+    g.slots[g.hotbar] = null; // bare hands
+    g.world.set(6, 5, { t: "grass", obj: "tree" });
+    mineFor(g);
+    expect(g.world.get(6, 5).obj).toBeUndefined(); // chopped too, nothing to wear either way
   });
 
   it("a hoe wears once per tilled tile", () => {
@@ -320,7 +329,7 @@ describe("tool durability in play", () => {
     priv(g).input.pressedUse = true;
     priv(g).useLogic(0.016);
     expect(g.world.get(6, 5).t).toBe("farmland");
-    expect(g.slots[g.hotbar]!.dur).toBe(26);
+    expect(g.slots[g.hotbar]!.dur).toBe(46);
   });
 
   it("a sword wears once per hit", () => {
@@ -328,9 +337,9 @@ describe("tool durability in play", () => {
     hold(g, "wood_sword");
     priv(g).wear("sword");
     priv(g).wear("sword");
-    expect(g.slots[g.hotbar]!.dur).toBe(10);
+    expect(g.slots[g.hotbar]!.dur).toBe(20);
     priv(g).wear("pickaxe"); // wrong type: nothing happens
-    expect(g.slots[g.hotbar]!.dur).toBe(10);
+    expect(g.slots[g.hotbar]!.dur).toBe(20);
   });
 
   it("tells the player when a tool breaks", () => {
@@ -382,13 +391,14 @@ describe("tool durability in play", () => {
         hotbarIndex: 0,
       };
       const loaded = new Game(makeCanvas(), { saveId: "t2", seed: 1234, difficulty: "easy", save: base });
-      // this save predates the rebalance (no toolsV): 7 of 12 uses left becomes 22 of 27
-      expect(loaded.slots[0]).toEqual({ id: "iron_pickaxe", n: 1, dur: 22 });
-      expect(loaded.slots[1]).toEqual({ id: "wood_axe", n: 1, dur: 12 });
-      expect(loaded.slots[2]).toEqual({ id: "diamond_sword", n: 1, dur: 40 });
+      // this save predates the rebalance entirely (no toolsV, so it's read as version 1)
+      expect(loaded.slots[0]).toEqual({ id: "iron_pickaxe", n: 1, dur: 42 });
+      expect(loaded.slots[1]).toEqual({ id: "wood_axe", n: 1, dur: 22 });
+      expect(loaded.slots[2]).toEqual({ id: "diamond_sword", n: 1, dur: 60 });
       expect(loaded.slots[3]).toEqual({ id: "wood", n: 12 });
 
-      // a save from the previous table (stone was 9): the stone tool gains the extra 9, the others stay put
+      // a save from version 2 (stone was 9): the stone tool gains the 9 it missed back then, plus
+      // this update's own +15, while the others only gain this update's increase
       const inv = [
         { id: "stone_axe", n: 1, dur: 4 },
         { id: "wood_axe", n: 1, dur: 4 },
@@ -401,14 +411,27 @@ describe("tool durability in play", () => {
         save: { ...base, inv, toolsV: 2 },
       });
       expect(v2.slots.slice(0, 3)).toEqual([
-        { id: "stone_axe", n: 1, dur: 13 },
-        { id: "wood_axe", n: 1, dur: 4 },
-        { id: "iron_pickaxe", n: 1, dur: 7 },
+        { id: "stone_axe", n: 1, dur: 28 },
+        { id: "wood_axe", n: 1, dur: 14 },
+        { id: "iron_pickaxe", n: 1, dur: 27 },
+      ]);
+
+      // a save from version 3 (right before this update: stone already 18) only gains this update's increase
+      const v3 = new Game(makeCanvas(), {
+        saveId: "t4",
+        seed: 1234,
+        difficulty: "easy",
+        save: { ...base, inv, toolsV: 3 },
+      });
+      expect(v3.slots.slice(0, 3)).toEqual([
+        { id: "stone_axe", n: 1, dur: 19 },
+        { id: "wood_axe", n: 1, dur: 14 },
+        { id: "iron_pickaxe", n: 1, dur: 27 },
       ]);
 
       // a save made with the current table is taken as it is
       const current = new Game(makeCanvas(), {
-        saveId: "t4",
+        saveId: "t5",
         seed: 1234,
         difficulty: "easy",
         save: { ...base, inv, toolsV: TOOLS_VERSION },
@@ -649,18 +672,18 @@ describe("torches", () => {
 describe("coal", () => {
   it("is mined with any pickaxe, drops coal and costs one use", () => {
     const g = makeGame();
-    g.slots[g.hotbar] = { id: "wood_pickaxe", n: 1, dur: 12 };
+    g.slots[g.hotbar] = { id: "wood_pickaxe", n: 1, dur: 22 };
     g.world.set(6, 5, { t: "stone", ore: "coal" });
     holdUse(g, 0.5, 4); // just long enough for the ore; the bare stone left behind is a separate block
     expect(g.countPublic("coal")).toBe(1);
     expect(g.world.get(6, 5).ore).toBeUndefined();
-    expect(g.slots[g.hotbar]!.dur).toBe(11);
+    expect(g.slots[g.hotbar]!.dur).toBe(21);
   });
 
   it("does not need a better pickaxe than wood, unlike iron", () => {
     const g = makeGame();
     g.world = new World(1234, {}, "under");
-    g.slots[g.hotbar] = { id: "wood_pickaxe", n: 1, dur: 12 };
+    g.slots[g.hotbar] = { id: "wood_pickaxe", n: 1, dur: 22 };
     g.world.set(6, 5, { t: "stone", ore: "iron" });
     holdUse(g, 0.5, 8);
     expect(g.world.get(6, 5).ore).toBe("iron");
@@ -909,5 +932,129 @@ describe("eating", () => {
     g.world.set(6, 5, { t: "grass", obj: "block_stone" });
     tap(g);
     expect(g.world.get(6, 5).obj).toBe("block_stone"); // a single tap does not start mining either
+  });
+});
+
+describe("combat balance", () => {
+  const TIERS = ["wood", "stone", "iron", "diamond"] as const;
+  /** hits a sword of this tier needs to drop a target with this much HP */
+  function hitsToKill(tier: (typeof TIERS)[number], hp: number) {
+    const g = makeGame();
+    hold(g, `${tier}_sword`);
+    priv(g).mobs.push(mob("corrupted", 6.5, 5.5, hp));
+    let hits = 0;
+    while (priv(g).mobs.length && hits < 50) {
+      priv(g).hitCool = 0;
+      holdUse(g, 0.05, 1);
+      hits++;
+    }
+    return hits;
+  }
+
+  it("each sword tier takes strictly fewer hits than the one before it", () => {
+    const hp = 48; // a corrupted's default HP
+    const hits = TIERS.map((t) => hitsToKill(t, hp));
+    for (let i = 1; i < hits.length; i++) expect(hits[i], TIERS[i]).toBeLessThan(hits[i - 1]!);
+    expect(hits[0]).toBeGreaterThan(hits[hits.length - 1]!); // wood clearly worse than diamond
+  });
+
+  it.each([
+    ["insect", 14],
+    ["hover", 14],
+    ["builder", 14],
+    ["corrupted", 48],
+    ["phantom", 56],
+    ["electric", 38],
+    ["creeper", 30],
+  ] as const)("%s has more HP than it used to, so a fight actually takes a few hits", (kind, hp) => {
+    const g = makeGame();
+    priv(g).mobs.push(mob(kind, 6.5, 5.5, hp));
+    hold(g, "wood_sword");
+    holdUse(g, 0.05, 1);
+    expect(priv(g).mobs).toHaveLength(1); // wood doesn't one-shot anything anymore
+  });
+});
+
+describe("tools specialize: fast at their own job, slow at everything else", () => {
+  it("a pickaxe mines stone fast; a sword or bare hands can still do it, just slowly", () => {
+    const rateFor = (id: string | null) => {
+      const g = makeGame();
+      if (id) hold(g, id);
+      g.world.set(6, 5, { t: "stone" });
+      return priv(g).mineTarget(g.world.get(6, 5))?.rate as number | undefined;
+    };
+    const pickaxe = rateFor("wood_pickaxe")!;
+    const bareHands = rateFor(null)!;
+    const sword = rateFor("wood_sword")!;
+    expect(pickaxe).toBeGreaterThan(bareHands);
+    expect(bareHands).toBeGreaterThan(0);
+    expect(sword).toBe(bareHands); // the sword is treated the same as bare hands: no bonus at all
+  });
+
+  it("stone is still minable (slowly) without any pickaxe, unlike before", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "stone" });
+    holdUse(g, 1, 40);
+    expect(g.world.get(6, 5).t).toBe("dirt");
+    expect(g.countPublic("stone")).toBe(1);
+  });
+
+  it("ore still flatly refuses anything but a proper pickaxe, however long you hold it", () => {
+    const g = makeGame();
+    g.world = new World(1234, {}, "under");
+    g.world.set(6, 5, { t: "stone", ore: "iron" });
+    holdUse(g, 1, 40); // bare hands
+    expect(g.world.get(6, 5).ore).toBe("iron");
+    expect(g.countPublic("iron")).toBe(0);
+  });
+
+  it("an axe chops wood fast; a pickaxe is slower at it than bare hands", () => {
+    const rateFor = (id: string | null) => {
+      const g = makeGame();
+      if (id) hold(g, id);
+      g.world.set(6, 5, { t: "grass", obj: "tree" });
+      return priv(g).mineTarget(g.world.get(6, 5))?.rate as number;
+    };
+    const axe = rateFor("wood_axe");
+    const bareHands = rateFor(null);
+    const pickaxe = rateFor("wood_pickaxe");
+    expect(axe).toBeGreaterThan(bareHands);
+    expect(pickaxe).toBeLessThan(bareHands); // the wrong tool is worse than no tool at all
+  });
+
+  it("swinging a pickaxe at a tree wears the pickaxe down, not an axe", () => {
+    const g = makeGame();
+    hold(g, "wood_pickaxe");
+    g.world.set(6, 5, { t: "grass", obj: "tree" });
+    holdUse(g, 1, 30);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.slots[g.hotbar]!.dur).toBeLessThan(22);
+  });
+
+  it("a diamond sword outfights a diamond pickaxe against the same mob", () => {
+    const withWeapon = (id: string) => {
+      const g = makeGame();
+      hold(g, id);
+      priv(g).mobs.push(mob("corrupted", 6.5, 5.5, 48));
+      let hits = 0;
+      while (priv(g).mobs.length && hits < 50) {
+        priv(g).hitCool = 0;
+        holdUse(g, 0.05, 1);
+        hits++;
+      }
+      return hits;
+    };
+    expect(withWeapon("diamond_sword")).toBeLessThan(withWeapon("diamond_pickaxe"));
+  });
+
+  it("a pickaxe swings slower than a sword in combat, and wears down when used that way", () => {
+    const g = makeGame();
+    hold(g, "iron_pickaxe");
+    priv(g).mobs.push(mob("corrupted", 6.5, 5.5, 100));
+    priv(g).input.held["use"] = true;
+    priv(g).useLogic(0.016);
+    expect(priv(g).hitCool).toBeCloseTo(0.85, 5);
+    expect(g.slots[g.hotbar]!.dur).toBeLessThan(47);
+    priv(g).input.held["use"] = false;
   });
 });

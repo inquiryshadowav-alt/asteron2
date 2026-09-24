@@ -122,6 +122,59 @@ describe("ores", () => {
     }
     expect([...found].sort()).toEqual(["coal", "diamond", "iron"]);
   });
+
+  it("are far more common as coal than iron, and far more common as iron than diamond", () => {
+    let coal = 0;
+    let iron = 0;
+    let diamond = 0;
+    let stone = 0;
+    for (const seed of SEEDS) {
+      const u = new World(seed, {}, "under");
+      for (let y = -60; y < 60; y++) {
+        for (let x = -60; x < 60; x++) {
+          const t = u.get(x, y);
+          if (t.t !== "stone") continue;
+          stone++;
+          if (t.ore === "coal") coal++;
+          else if (t.ore === "iron") iron++;
+          else if (t.ore === "diamond") diamond++;
+        }
+      }
+    }
+    expect(coal).toBeGreaterThan(iron * 2);
+    expect(iron).toBeGreaterThan(diamond * 2);
+    expect(diamond).toBeGreaterThan(0); // still findable, just rare
+    expect(diamond / stone).toBeLessThan(0.01); // meaningfully rarer than plain "1 in 100"
+  });
+
+  it("leaves some cave systems with no diamond nearby, so finding one takes exploring", () => {
+    let caves = 0;
+    let withoutDiamond = 0;
+    for (const seed of SEEDS) {
+      const surface = new World(seed, {}, "surface");
+      const under = new World(seed, {}, "under");
+      for (let ry = -3; ry <= 3; ry++) {
+        for (let rx = -3; rx <= 3; rx++) {
+          const a = surface.anchor(rx, ry);
+          if (!a || surface.get(a.x, a.y).t === "water") continue;
+          caves++;
+          let found = false;
+          for (let y = a.y - 16; y <= a.y + 16 && !found; y++) {
+            for (let x = a.x - 16; x <= a.x + 16; x++) {
+              if (under.get(x, y).ore === "diamond") {
+                found = true;
+                break;
+              }
+            }
+          }
+          if (!found) withoutDiamond++;
+        }
+      }
+    }
+    expect(caves).toBeGreaterThan(20);
+    expect(withoutDiamond).toBeGreaterThan(0);
+    expect(withoutDiamond).toBeLessThan(caves); // but not every cave comes up empty
+  });
 });
 
 describe("torch bookkeeping", () => {
