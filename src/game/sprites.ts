@@ -353,6 +353,7 @@ export const MOB_SPRITE: Record<string, string> = {
   phantom: "phantom",
   electric: "electric",
   creeper: "creeper",
+  zombie: "zombie",
 };
 
 export function drawMob(c: Ctx, kind: string, x: number, baseY: number, S: number, flash: boolean, bob = 0) {
@@ -391,4 +392,193 @@ export function drawTorch(c: Ctx, x: number, baseY: number, S: number, time: num
     }
   });
   if (frame === 1) px(c, x + 7.6 * u, top + 0 * u, u * 0.8, u * 0.8, "#ffd27a"); // a stray spark
+}
+
+// ---------- Ghost Block glow ----------
+
+/**
+ * The Ghost Block's aura, drawn over its sprite: a faint violet shimmer while idle, and a hard red
+ * pulse that speeds up as the boss comes due. `warn` is 0 while idle and 0 -> 1 across the warning.
+ */
+export function drawGhostGlow(c: Ctx, x: number, baseY: number, S: number, warn: number, time: number) {
+  const cx = x + S / 2;
+  const cy = baseY - S / 2;
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  if (warn <= 0) {
+    const a = 0.16 + 0.06 * Math.sin(time * 2);
+    const gr = c.createRadialGradient(cx, cy, S * 0.1, cx, cy, S * 1.0);
+    gr.addColorStop(0, `rgba(150,80,255,${a})`);
+    gr.addColorStop(1, "rgba(150,80,255,0)");
+    c.fillStyle = gr;
+    c.fillRect(cx - S, cy - S, S * 2, S * 2);
+  } else {
+    // normal blending: red stays red, whatever ground it sits on
+    c.globalCompositeOperation = "source-over";
+    const pulse = 0.5 + 0.5 * Math.sin(time * (7 + warn * 16));
+    const r = S * (1.1 + 0.7 * warn + 0.25 * pulse);
+    const gr = c.createRadialGradient(cx, cy, S * 0.1, cx, cy, r);
+    gr.addColorStop(0, `rgba(255,40,30,${0.45 + 0.4 * pulse})`);
+    gr.addColorStop(0.5, `rgba(255,20,20,${0.22 + 0.25 * pulse})`);
+    gr.addColorStop(1, "rgba(255,20,20,0)");
+    c.fillStyle = gr;
+    c.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  c.restore();
+}
+
+// ---------- the Stormcaller ----------
+
+/**
+ * The boss, centred on x, wrapped in a glowing green aura (the flames themselves are particles the
+ * engine spawns around it). `rise` goes 0 -> 1 while it climbs out of the Ghost Block.
+ */
+export function drawBoss(c: Ctx, cx: number, baseY: number, S: number, flash: boolean, bob: number, rise: number, time: number) {
+  const img = sprite("stormcaller");
+  const lift = S * (0.5 + 0.09 * Math.sin(bob));
+  const w = S * 3.7;
+  const h = img ? (img.naturalHeight / img.naturalWidth) * w : w;
+  const sink = (1 - rise) * S * 1.4;
+  const top = baseY - lift - h + sink;
+  c.save();
+  shadow(c, cx, baseY, S, 1.5);
+  // green fire glow behind and around the body
+  c.globalCompositeOperation = "lighter";
+  const gr = c.createRadialGradient(cx, top + h * 0.55, h * 0.1, cx, top + h * 0.55, h * 0.75);
+  const flick = 0.5 + 0.12 * Math.sin(time * 9) + 0.06 * Math.sin(time * 23);
+  gr.addColorStop(0, `rgba(60,255,90,${0.42 * flick * rise})`);
+  gr.addColorStop(0.6, `rgba(40,200,70,${0.22 * flick * rise})`);
+  gr.addColorStop(1, "rgba(40,200,70,0)");
+  c.fillStyle = gr;
+  c.fillRect(cx - h, top - h * 0.2, h * 2, h * 1.5);
+  c.globalCompositeOperation = "source-over";
+  c.globalAlpha = Math.min(1, 0.25 + rise * 0.75);
+  if (img) {
+    const src = flash ? redVersion("stormcaller", img) : null;
+    c.drawImage(src ?? img, cx - w / 2, top, w, h);
+  } else {
+    px(c, cx - w / 4, top, w / 2, h, flash ? "#e64444" : "#2a1a3a");
+  }
+  c.restore();
+}
+
+// ---------- boss attack effects (screen coordinates) ----------
+
+/** a thick red laser with a white-hot core */
+export function drawBeam(c: Ctx, x0: number, y0: number, x1: number, y1: number, width: number, alpha: number) {
+  c.save();
+  c.lineCap = "round";
+  c.globalAlpha = Math.max(0, Math.min(1, alpha));
+  c.globalCompositeOperation = "lighter";
+  c.strokeStyle = "rgba(255,40,40,0.55)";
+  c.lineWidth = width * 1.9;
+  c.beginPath();
+  c.moveTo(x0, y0);
+  c.lineTo(x1, y1);
+  c.stroke();
+  c.globalCompositeOperation = "source-over";
+  c.strokeStyle = "#ff3030";
+  c.lineWidth = width;
+  c.stroke();
+  c.strokeStyle = "#ffffff";
+  c.lineWidth = width * 0.38;
+  c.stroke();
+  c.restore();
+}
+
+/** the charging orb in front of the boss before the laser fires: `p` runs 0 -> 1 */
+export function drawCharge(c: Ctx, x: number, y: number, S: number, p: number, time: number) {
+  const r = S * (0.25 + 0.75 * p) * (1 + 0.1 * Math.sin(time * 30));
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  const gr = c.createRadialGradient(x, y, 0, x, y, r * 1.6);
+  gr.addColorStop(0, "rgba(255,255,255,0.95)");
+  gr.addColorStop(0.35, "rgba(255,60,60,0.8)");
+  gr.addColorStop(1, "rgba(255,30,30,0)");
+  c.fillStyle = gr;
+  c.fillRect(x - r * 1.6, y - r * 1.6, r * 3.2, r * 3.2);
+  c.restore();
+}
+
+/** Storm Blast warning: the danger circle fills from the centre as the blast winds up (`p` 0 -> 1) */
+export function drawStormWarning(c: Ctx, x: number, y: number, r: number, p: number) {
+  c.save();
+  c.fillStyle = `rgba(160,80,255,${0.10 + 0.12 * p})`;
+  c.beginPath();
+  c.arc(x, y, r, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = `rgba(200,140,255,${0.5 + 0.4 * p})`;
+  c.lineWidth = 3;
+  c.setLineDash([10, 8]);
+  c.beginPath();
+  c.arc(x, y, r, 0, Math.PI * 2);
+  c.stroke();
+  c.setLineDash([]);
+  c.strokeStyle = `rgba(255,255,255,${0.35 + 0.5 * p})`;
+  c.lineWidth = 4;
+  c.beginPath();
+  c.arc(x, y, r * p, 0, Math.PI * 2);
+  c.stroke();
+  c.restore();
+}
+
+/** the Storm Blast itself: a bright shockwave that flies out and fades (`p` 0 -> 1) */
+export function drawStormBurst(c: Ctx, x: number, y: number, r: number, p: number) {
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  c.strokeStyle = `rgba(210,170,255,${1 - p})`;
+  c.lineWidth = 12 * (1 - p) + 2;
+  c.beginPath();
+  c.arc(x, y, r * (0.35 + 0.75 * p), 0, Math.PI * 2);
+  c.stroke();
+  c.fillStyle = `rgba(150,90,255,${0.35 * (1 - p)})`;
+  c.beginPath();
+  c.arc(x, y, r * (0.35 + 0.75 * p), 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+}
+
+/** where lightning is about to land: a pulsing yellow ring on the tile (`p` 0 -> 1) */
+export function drawLightningWarning(c: Ctx, x: number, y: number, r: number, p: number, time: number) {
+  const pulse = 0.5 + 0.5 * Math.sin(time * (10 + p * 20));
+  c.save();
+  c.fillStyle = `rgba(255,240,120,${0.10 + 0.22 * p * pulse})`;
+  c.beginPath();
+  c.arc(x, y, r, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = `rgba(255,235,90,${0.55 + 0.4 * pulse})`;
+  c.lineWidth = 3;
+  c.beginPath();
+  c.arc(x, y, r * (1 - 0.35 * p), 0, Math.PI * 2);
+  c.stroke();
+  c.restore();
+}
+
+/** the bolt: a jagged white-blue line from high above down to the tile, fading with `alpha` */
+export function drawLightningBolt(c: Ctx, x: number, y: number, height: number, alpha: number, seed: number, r: number) {
+  c.save();
+  c.globalAlpha = Math.max(0, Math.min(1, alpha));
+  const pts: [number, number][] = [[x, y]];
+  const n = 9;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const jitter = (hash(i, seed, 5) - 0.5) * r * 1.3 * (1 - t * 0.2);
+    pts.push([x + (i === n ? 0 : jitter), y - height * t]);
+  }
+  c.lineJoin = "round";
+  c.lineCap = "round";
+  for (const [w, col] of [[r * 1.1, "rgba(90,130,255,0.45)"], [r * 0.5, "#8fb0ff"], [r * 0.2, "#ffffff"]] as const) {
+    c.strokeStyle = col;
+    c.lineWidth = w;
+    c.beginPath();
+    pts.forEach(([px2, py2], i) => (i ? c.lineTo(px2, py2) : c.moveTo(px2, py2)));
+    c.stroke();
+  }
+  // impact flash
+  const gr = c.createRadialGradient(x, y, 0, x, y, r * 1.5);
+  gr.addColorStop(0, "rgba(255,255,255,0.9)");
+  gr.addColorStop(1, "rgba(150,180,255,0)");
+  c.fillStyle = gr;
+  c.fillRect(x - r * 1.5, y - r * 1.5, r * 3, r * 3);
+  c.restore();
 }

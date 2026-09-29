@@ -20,9 +20,37 @@ import {
   type Tile,
   type ToolType,
 } from "./data";
+import {
+  BOSS,
+  BOSS_LOOT,
+  GHOST_RANGE,
+  beamHits,
+  ghostCycle,
+  ghostWarning,
+  lightningTile,
+  pauseSeconds,
+  pickMoves,
+  snapDir8,
+  type BossMove,
+} from "./boss";
 import { InputMap } from "./input";
 import { World, writeSave, type Layer, type WorldSave } from "./world";
-import { drawGround, drawMob, drawObject, drawPlayer, drawTorch, preloadSprites } from "./sprites";
+import {
+  drawBeam,
+  drawBoss,
+  drawCharge,
+  drawGhostGlow,
+  drawGround,
+  drawLightningBolt,
+  drawLightningWarning,
+  drawMob,
+  drawObject,
+  drawPlayer,
+  drawStormBurst,
+  drawStormWarning,
+  drawTorch,
+  preloadSprites,
+} from "./sprites";
 
 export interface Slot {
   id: string;
@@ -49,9 +77,13 @@ export interface Hud {
   sleeping: boolean;
   /** x / y / z relative to where the player first spawned; z is 0 outside and negative in the caves */
   pos: { x: number; y: number; z: number };
+  /** XP the player is carrying (zombies drop it; the Ghost Block costs it) */
+  xp: number;
+  /** the Stormcaller's health while it is fighting, otherwise null */
+  boss: { hp: number; max: number } | null;
 }
 
-type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper";
+type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper" | "zombie";
 
 interface MobDef {
   hp: number;
@@ -75,6 +107,8 @@ const MOBS: Record<MobKind, MobDef> = {
   phantom: { hp: 56, speed: 1.5, range: 12, dmg: 5, hostile: true, shoots: true, drop: { id: "stick", n: 1 } },
   electric: { hp: 38, speed: 2.6, range: 12, dmg: 4, hostile: true, erratic: true },
   creeper: { hp: 30, speed: 1.5, range: 12, dmg: 22, hostile: true, explodes: true },
+  // slow, sturdy, and the only source of XP
+  zombie: { hp: 40, speed: 1.35, range: 12, dmg: 7, hostile: true, drop: { id: "xp", n: 1 } },
 };
 
 interface Mob {
@@ -103,6 +137,7 @@ const MOB_FX: Record<MobKind, [string, string]> = {
   phantom: ["#6b7bd6", "#dfe4ff"],
   electric: ["#ffcf2e", "#fff7a0"],
   creeper: ["#3f8a2a", "#9be25a"],
+  zombie: ["#4f8a3a", "#b9f27a"],
 };
 
 /** a square pixel of a visual effect; x / y are in world tiles */
@@ -126,6 +161,46 @@ interface Arrow {
   vx: number;
   vy: number;
   life: number;
+}
+
+type BossState = "emerge" | "pause" | "approach" | "windup" | "recover";
+
+/** the Stormcaller: one at a time, summoned by a Ghost Block, hunting the player who placed it */
+interface Boss {
+  x: number;
+  y: number;
+  hp: number;
+  max: number;
+  state: BossState;
+  /** seconds left in the current state */
+  t: number;
+  /** the move being prepared or dashed toward */
+  move: BossMove | null;
+  /** moves still to run in the current pair */
+  queue: BossMove[];
+  hurt: number;
+  bob: number;
+}
+
+/** a laser that has just fired: a fixed line, so it never follows the player */
+interface Beam {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  life: number;
+  hit: boolean;
+}
+
+/** lightning: a warning on a tile, then the strike */
+interface Bolt {
+  tx: number;
+  ty: number;
+  /** seconds until it lands */
+  warn: number;
+  /** seconds the bolt stays visible after landing (0 while still warning) */
+  strike: number;
+  seed: number;
 }
 
 /** a full day is 7 minutes of daylight followed by 7 minutes of night */
@@ -191,6 +266,17 @@ export class Game {
   held: Slot | null = null;
 
   mobs: Mob[] = [];
+  boss: Boss | null = null;
+  beams: Beam[] = [];
+  bolts: Bolt[] = [];
+  /** Storm Blast shockwaves, for drawing */
+  bursts: { x: number; y: number; t: number }[] = [];
+  /** knockback the player is still carrying, in tiles per second */
+  kx = 0;
+  ky = 0;
+  /** the pulse cycle each Ghost Block was last seen in, so a summon fires exactly once per pulse */
+  private ghostSeen = new Map<string, number>();
+  private flameAcc = 0;
   arrows: Arrow[] = [];
   booms: { x: number; y: number; t: number }[] = [];
   particles: Particle[] = [];
@@ -325,6 +411,7 @@ export class Game {
     this.world = new World(this.world.seed, down ? this.underChanges : this.surfaceChanges, layer);
     this.mobs = [];
     this.arrows = [];
+    this.clearBoss();
     this.mining = 0;
     this.miningKey = "";
     // the exit below sits exactly under the entrance above, so both trips land on the portal tile
@@ -418,6 +505,8 @@ export class Game {
       mining: this.mining,
       sleeping: this.sleeping > 0,
       pos: this.coords(),
+      xp: this.countOf("xp"),
+      boss: this.boss ? { hp: this.boss.hp, max: this.boss.max } : null,
     });
   }
 
@@ -595,6 +684,7 @@ export class Game {
         // night is the second half of a day, so sleeping always wakes up in the next day's morning
         this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + MORNING;
         this.mobs = this.mobs.filter((m) => !MOBS[m.kind].hostile);
+        this.ghostSeen.clear(); // the clock jumped ahead: a Ghost Block must not fire for every pulse slept through
         this.say("Good morning!");
       }
       this.emit();
@@ -645,8 +735,23 @@ export class Game {
       if (this.canStand(this.x, ny)) this.y = ny;
     }
 
+    // knockback (Storm Blast): slides the player away, stopped by walls, fading fast
+    if (this.kx || this.ky) {
+      const nx = this.x + this.kx * dt;
+      const ny = this.y + this.ky * dt;
+      if (this.canStand(nx, this.y)) this.x = nx;
+      else this.kx = 0;
+      if (this.canStand(this.x, ny)) this.y = ny;
+      else this.ky = 0;
+      const decay = Math.max(0, 1 - 5 * dt);
+      this.kx = Math.abs(this.kx * decay) < 0.05 ? 0 : this.kx * decay;
+      this.ky = Math.abs(this.ky * decay) < 0.05 ? 0 : this.ky * decay;
+    }
+
     this.useLogic(dt);
     this.updateCrops();
+    this.updateGhosts();
+    this.updateBoss(dt);
     this.updateMobs(dt);
     this.updateArrows(dt);
     this.booms = this.booms.filter((b) => (b.t -= dt) > 0);
@@ -655,6 +760,7 @@ export class Game {
     if (this.hp <= 0 && !this.dead) {
       this.hp = 0;
       this.dead = true;
+      this.clearBoss(); // the fight resets when the player falls
       this.save();
     }
 
@@ -683,7 +789,10 @@ export class Game {
 
     // attack a mob in front
     const target = this.mobs.find((m) => Math.abs(m.x - (tx + 0.5)) < 0.8 && Math.abs(m.y - (ty + 0.5)) < 0.8);
-    if (holding && target) {
+    // the Stormcaller is big: any swing at the tile in front that lands inside its body counts
+    const bossTarget =
+      this.boss && this.boss.state !== "emerge" && Math.hypot(this.boss.x - (tx + 0.5), this.boss.y - (ty + 0.5)) < 1.7 ? this.boss : null;
+    if (holding && (target || bossTarget)) {
       if (this.hitCool <= 0) {
         // a sword (or bare fists) swings at normal speed; a pickaxe, axe or hoe is a slow, weak
         // substitute — good for a job, bad for a fight
@@ -691,15 +800,21 @@ export class Game {
         const sword = heldTool?.type === "sword" ? heldTool.tier : undefined;
         const dmg = sword ? SWORD_DAMAGE[sword] : heldTool ? TOOL_ATTACK_DAMAGE[heldTool.tier] : BARE_HAND_DAMAGE;
         this.hitCool = heldTool && !sword ? TOOL_HIT_COOLDOWN : SWORD_HIT_COOLDOWN;
-        target.hp -= dmg;
+        if (target) target.hp -= dmg;
+        else if (bossTarget) bossTarget.hp -= dmg;
         if (sword) this.wear("sword");
         else if (heldTool) this.wear(heldTool.type);
-        target.hurt = 0.35;
-        target.flee = 1.4;
-        const away = Math.atan2(target.y - this.y, target.x - this.x);
-        target.vx = Math.cos(away) * 3;
-        target.vy = Math.sin(away) * 3;
-        if (target.hp <= 0) this.killMob(target);
+        if (target) {
+          target.hurt = 0.35;
+          target.flee = 1.4;
+          const away = Math.atan2(target.y - this.y, target.x - this.x);
+          target.vx = Math.cos(away) * 3;
+          target.vy = Math.sin(away) * 3;
+          if (target.hp <= 0) this.killMob(target);
+        } else if (bossTarget) {
+          bossTarget.hurt = 0.25; // a flash, no knockback: it does not flinch
+          if (bossTarget.hp <= 0) this.killBoss();
+        }
       }
       this.mining = 0;
       return;
@@ -730,10 +845,17 @@ export class Game {
 
     // sleep in a sleeping tube
     if (pressed && (tile.obj === "bed" || tile.obj === "bed2")) {
-      if (this.isNight()) {
+      if (this.boss) this.say("You can't sleep while the Stormcaller is here");
+      else if (this.isNight()) {
         this.sleeping = 1.6;
         this.say("Sleeping...");
       } else this.say("You can only sleep at night");
+      return;
+    }
+
+    // the Ghost Block never breaks: nothing mines it, blasts it, or picks it up
+    if (pressed && tile.obj === "ghost_block") {
+      this.say("The Ghost Block cannot be broken");
       return;
     }
 
@@ -821,6 +943,17 @@ export class Game {
     }
     // place block
     if (selDef?.place && !tile.obj && tile.t !== "water") {
+      if (selDef.place === "ghost_block") {
+        if (this.world.layer !== "surface") {
+          this.say("The Ghost Block only works on the surface");
+          return;
+        }
+        // pt remembers when it was placed: its pulse cycle counts from here
+        this.world.set(tx, ty, { ...tile, obj: "ghost_block", pt: this.time });
+        this.take(sel!.id, 1);
+        this.say("The Ghost Block hums... something is coming");
+        return;
+      }
       this.world.set(tx, ty, { ...tile, obj: selDef.place });
       this.take(sel!.id, 1);
     }
@@ -845,6 +978,7 @@ export class Game {
   private killMob(m: Mob) {
     const d = MOBS[m.kind].drop;
     if (d) this.give(d.id, d.n);
+    if (d?.id === "xp") this.say(`+${d.n} XP`);
     this.mobs = this.mobs.filter((o) => o !== m);
     this.deathFx(m);
   }
@@ -1007,7 +1141,7 @@ export class Game {
     const maxPassive = 8;
     const kinds: MobKind[] = night
       ? hostile < maxHostile
-        ? ["corrupted", "phantom", "electric", "creeper"]
+        ? ["corrupted", "phantom", "electric", "creeper", "zombie", "zombie"] // zombies are twice as common: XP is the gate to the boss
         : []
       : passive < maxPassive
         ? ["insect", "hover", "builder"]
@@ -1127,6 +1261,226 @@ export class Game {
     this.mobs = this.mobs.filter((m) => Math.hypot(m.x - this.x, m.y - this.y) < 40);
   }
 
+  // ---------- Ghost Block + Stormcaller ----------
+
+  /**
+   * Every Ghost Block pulses on a fixed cycle. The moment a cycle ends the boss comes straight out
+   * of the block: no checks on the tiles around it or the terrain under it.
+   */
+  private updateGhosts() {
+    if (this.world.layer !== "surface") return;
+    for (const k in this.world.changes) {
+      const t = this.world.changes[k]!;
+      if (t.obj !== "ghost_block" || t.pt === undefined) continue;
+      const cycle = ghostCycle(t.pt, this.time);
+      const seen = this.ghostSeen.get(k);
+      this.ghostSeen.set(k, cycle);
+      if (seen === undefined || cycle <= seen) continue;
+      const [gx, gy] = k.split(",");
+      this.summonBoss(Number(gx) + 0.5, Number(gy) + 0.5);
+    }
+  }
+
+  /** the boss climbs out of the block; only one at a time, and only when the player is around to face it */
+  private summonBoss(x: number, y: number) {
+    if (this.boss || this.dead) return;
+    if (Math.hypot(this.x - x, this.y - y) > GHOST_RANGE) return;
+    this.boss = { x, y, hp: BOSS.hp, max: BOSS.hp, state: "emerge", t: BOSS.emergeTime, move: null, queue: [], hurt: 0, bob: 0 };
+    this.say("The Stormcaller rises!");
+  }
+
+  /** the fight is over (or reset): the boss and everything it cast are gone */
+  private clearBoss() {
+    this.boss = null;
+    this.beams = [];
+    this.bolts = [];
+    this.bursts = [];
+    this.kx = 0;
+    this.ky = 0;
+    this.emit();
+  }
+
+  /** victory: it bursts apart and leaves Shiny Metal */
+  private killBoss() {
+    const b = this.boss;
+    if (!b) return;
+    this.deathBurst(b.x, b.y - 1.5, ["#22c04a", "#a879ff"], 60);
+    this.clearBoss();
+    this.give(BOSS_LOOT.id, BOSS_LOOT.n);
+    this.say("The Stormcaller is defeated!");
+  }
+
+  private deathBurst(x: number, y: number, [a, b]: [string, string], n: number) {
+    const r = Math.random;
+    for (let i = 0; i < n; i++) {
+      const ang = r() * Math.PI * 2;
+      const sp = 2 + r() * 5;
+      const max = 0.6 + r() * 0.7;
+      this.particles.push({
+        x,
+        y,
+        vx: Math.cos(ang) * sp,
+        vy: Math.sin(ang) * sp - 0.8,
+        life: max,
+        max,
+        size: 3 + Math.floor(r() * 3),
+        grow: 0,
+        color: i % 3 === 0 ? b : a,
+      });
+    }
+  }
+
+  private updateBoss(dt: number) {
+    // cast effects run on their own clocks, but only ever exist while a boss does
+    const b = this.boss;
+    if (!b) return;
+    const scale = this.difficulty === "hard" ? 1.35 : 1;
+    b.bob += dt * 2.4;
+    if (b.hurt > 0) b.hurt -= dt;
+    const dx = this.x - b.x;
+    const dy = this.y - b.y;
+    const dist = Math.hypot(dx, dy) || 0.0001;
+    if (dist > 60) {
+      this.clearBoss(); // the player got away: it gives up and resets
+      return;
+    }
+
+    // green flames licking up around it: small embers rising off the whole body, not a blob on top of it
+    this.flameAcc += dt * 26;
+    while (this.flameAcc >= 1) {
+      this.flameAcc -= 1;
+      const max = 0.55 + Math.random() * 0.6;
+      this.particles.push({
+        x: b.x + (Math.random() - 0.5) * 2.6,
+        y: b.y - 0.6 - Math.random() * 2.6,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: -0.9 - Math.random() * 1.2,
+        life: max,
+        max,
+        size: 2 + Math.floor(Math.random() * 2),
+        grow: 1.5,
+        color: ["#1fbf3a", "#5cff6e", "#c8ff9a", "#0f8a2a"][Math.floor(Math.random() * 4)]!,
+      });
+    }
+
+    switch (b.state) {
+      case "emerge":
+        b.t -= dt;
+        if (b.t <= 0) {
+          b.state = "pause";
+          b.t = 1.2;
+        }
+        break;
+      case "pause": {
+        // hover at a comfortable distance, circling a little
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const want = dist > BOSS.hoverDist + 1 ? 1 : dist < BOSS.hoverDist - 1 ? -0.7 : 0;
+        b.x += (ux * want + -uy * 0.35) * BOSS.driftSpeed * dt;
+        b.y += (uy * want + ux * 0.35) * BOSS.driftSpeed * dt;
+        b.t -= dt;
+        if (b.t <= 0) {
+          b.queue = pickMoves();
+          this.nextBossMove(b);
+        }
+        break;
+      }
+      case "approach":
+        // closing in for the Storm Blast, which only reaches the player up close
+        b.t -= dt;
+        if (dist <= BOSS.storm.closeIn || b.t <= 0) this.beginWindup(b, "storm");
+        else {
+          b.x += (dx / dist) * BOSS.dashSpeed * dt;
+          b.y += (dy / dist) * BOSS.dashSpeed * dt;
+        }
+        break;
+      case "windup":
+        b.t -= dt;
+        if (b.t <= 0) this.fireBossMove(b, scale);
+        break;
+      case "recover":
+        b.t -= dt;
+        if (b.t <= 0) this.nextBossMove(b);
+        break;
+    }
+
+    this.updateBossCasts(dt, scale);
+  }
+
+  /** run the next move of the current pair, or take the 3-7 second breather once both are done */
+  private nextBossMove(b: Boss) {
+    const m = b.queue.shift();
+    if (!m) {
+      b.state = "pause";
+      b.move = null;
+      b.t = pauseSeconds();
+      return;
+    }
+    if (m === "storm") {
+      b.state = "approach";
+      b.move = m;
+      b.t = BOSS.storm.dashTimeout;
+    } else this.beginWindup(b, m);
+  }
+
+  private beginWindup(b: Boss, m: BossMove) {
+    b.state = "windup";
+    b.move = m;
+    b.t = BOSS[m].windup;
+    if (m === "lightning") {
+      // the target is chosen now, so the warning shows the player exactly where to get out of
+      const { tx, ty } = lightningTile(this.x, this.y, Math.random, (x, y) => this.world.walkable(x, y));
+      this.bolts.push({ tx, ty, warn: BOSS.lightning.windup, strike: 0, seed: Math.random() * 100 });
+    }
+  }
+
+  private fireBossMove(b: Boss, scale: number) {
+    const m = b.move;
+    if (m === "laser") {
+      // aimed at where the player stands right now, snapped to one of the 8 directions; it never homes
+      const dir = snapDir8(this.x - b.x, this.y - b.y);
+      this.beams.push({ x: b.x, y: b.y, dx: dir.dx, dy: dir.dy, life: BOSS.laser.life, hit: false });
+    } else if (m === "storm") {
+      this.bursts.push({ x: b.x, y: b.y, t: 0.4 });
+      const dist = Math.hypot(this.x - b.x, this.y - b.y);
+      if (dist < BOSS.storm.radius) {
+        this.damage(BOSS.storm.dmg * scale);
+        const a = dist > 0.001 ? Math.atan2(this.y - b.y, this.x - b.x) : Math.PI / 2;
+        this.kx = Math.cos(a) * BOSS.storm.knock;
+        this.ky = Math.sin(a) * BOSS.storm.knock;
+      }
+    }
+    // lightning lands on its own timer (see updateBossCasts)
+    b.state = "recover";
+    b.move = null;
+    b.t = BOSS.recoverTime;
+  }
+
+  /** lasers, lightning and shockwaves already in the air */
+  private updateBossCasts(dt: number, scale: number) {
+    for (const beam of this.beams) {
+      beam.life -= dt;
+      if (!beam.hit && beamHits(beam.x, beam.y, beam.dx, beam.dy, BOSS.laser.length, BOSS.laser.halfWidth, this.x, this.y)) {
+        beam.hit = true;
+        this.damage(BOSS.laser.dmg * scale);
+      }
+    }
+    this.beams = this.beams.filter((x) => x.life > 0);
+
+    for (const bolt of this.bolts) {
+      if (bolt.warn > 0) {
+        bolt.warn -= dt;
+        if (bolt.warn <= 0) {
+          bolt.strike = BOSS.lightning.life;
+          if (Math.hypot(this.x - (bolt.tx + 0.5), this.y - (bolt.ty + 0.5)) <= BOSS.lightning.radius) this.damage(BOSS.lightning.dmg * scale);
+        }
+      } else bolt.strike -= dt;
+    }
+    this.bolts = this.bolts.filter((x) => x.warn > 0 || x.strike > 0);
+
+    this.bursts = this.bursts.filter((x) => (x.t -= dt) > 0);
+  }
+
   private explode(m: Mob, dmg: number) {
     this.booms.push({ x: m.x, y: m.y, t: 0.5 });
     this.deathFx(m);
@@ -1140,7 +1494,7 @@ export class Game {
           const tx = Math.floor(m.x) + ox;
           const ty = Math.floor(m.y) + oy;
           const t = this.world.get(tx, ty);
-          const breaks = !!t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit";
+          const breaks = !!t.obj && t.obj !== "mountain" && t.obj !== "cave_entrance" && t.obj !== "cave_exit" && t.obj !== "ghost_block";
           if (breaks || t.torch) {
             this.world.set(tx, ty, {
               ...t,
@@ -1189,6 +1543,8 @@ export class Game {
     this.hurtFlash = 0;
     this.mobs = [];
     this.arrows = [];
+    this.clearBoss();
+    this.ghostSeen.clear();
     this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + MORNING;
     this.save();
     this.emit();
@@ -1240,7 +1596,17 @@ export class Game {
         const by = (ty + 1) * S - camY;
         if (t.obj) {
           const kind = t.obj;
-          if (OBJ_TALL[kind]) draws.push({ baseY: by, fn: () => drawObject(c, kind, sx, by, S) });
+          if (kind === "ghost_block") {
+            // idle shimmer, then a red pulse that quickens until the boss comes out
+            const warn = t.pt === undefined ? 0 : ghostWarning(t.pt, this.time);
+            draws.push({
+              baseY: by,
+              fn: () => {
+                drawObject(c, kind, sx, by, S);
+                drawGhostGlow(c, sx, by, S, warn, this.time);
+              },
+            });
+          } else if (OBJ_TALL[kind]) draws.push({ baseY: by, fn: () => drawObject(c, kind, sx, by, S) });
           else drawObject(c, kind, sx, by, S);
         }
         if (t.torch) drawTorch(c, sx, by, S, this.time, tx, ty);
@@ -1254,12 +1620,21 @@ export class Game {
       const bob = m.bob;
       draws.push({ baseY: by, fn: () => drawMob(c, kind, sx, by, S, flash, bob) });
     }
+    const boss = this.boss;
+    if (boss) {
+      const bx = boss.x * S - camX;
+      const bby = boss.y * S - camY + S * 0.35;
+      const rise = boss.state === "emerge" ? 1 - boss.t / BOSS.emergeTime : 1;
+      draws.push({ baseY: bby, fn: () => drawBoss(c, bx, bby, S, boss.hurt > 0, boss.bob, rise, this.time) });
+    }
     const psx = this.x * S - camX - S / 2;
     const pby = this.y * S - camY + S * 0.35;
     const pbob = this.time * 3.2;
     draws.push({ baseY: pby, fn: () => drawPlayer(c, psx, pby, S, this.dir, this.hurtFlash > 0, pbob) });
     draws.sort((a, b) => a.baseY - b.baseY);
     draws.forEach((d) => d.fn());
+
+    if (boss) this.drawBossEffects(c, boss, S, camX, camY);
 
     // arrows
     c.fillStyle = "#e8e8e0";
@@ -1301,6 +1676,41 @@ export class Game {
       vg.addColorStop(1, `rgba(190,15,15,${a})`);
       c.fillStyle = vg;
       c.fillRect(0, 0, W, H);
+    }
+  }
+
+  /** warnings and attacks of the Stormcaller, drawn over the world */
+  private drawBossEffects(c: CanvasRenderingContext2D, b: Boss, S: number, camX: number, camY: number) {
+    // everything sits at "chest height": the ground plane the fight is computed on, lifted a little
+    const lift = S * 0.6;
+    const sx = (wx: number) => wx * S - camX;
+    const sy = (wy: number) => wy * S - camY;
+
+    if (b.state === "windup" && b.move === "laser") {
+      drawCharge(c, sx(b.x), sy(b.y) - lift, S, 1 - b.t / BOSS.laser.windup, this.time);
+    }
+    if (b.move === "storm" && b.state === "windup") {
+      drawStormWarning(c, sx(b.x), sy(b.y), BOSS.storm.radius * S, 1 - b.t / BOSS.storm.windup);
+    }
+    for (const burst of this.bursts) drawStormBurst(c, sx(burst.x), sy(burst.y), BOSS.storm.radius * S, 1 - burst.t / 0.4);
+    for (const bolt of this.bolts) {
+      const cx = sx(bolt.tx + 0.5);
+      const cy = sy(bolt.ty + 0.5);
+      if (bolt.warn > 0) drawLightningWarning(c, cx, cy, BOSS.lightning.radius * S, 1 - bolt.warn / BOSS.lightning.windup, this.time);
+      else drawLightningBolt(c, cx, cy, S * 8, bolt.strike / BOSS.lightning.life, bolt.seed, S * 0.55);
+    }
+    for (const beam of this.beams) {
+      const len = BOSS.laser.length;
+      const fade = beam.life / BOSS.laser.life;
+      drawBeam(
+        c,
+        sx(beam.x),
+        sy(beam.y) - lift,
+        sx(beam.x + beam.dx * len),
+        sy(beam.y + beam.dy * len) - lift,
+        S * BOSS.laser.halfWidth * 2 * (0.5 + 0.5 * fade),
+        Math.min(1, fade * 1.6),
+      );
     }
   }
 

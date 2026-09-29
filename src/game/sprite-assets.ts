@@ -13,6 +13,7 @@ import a_diamond_sword from "./assets/diamond_sword.png";
 import a_dirt from "./assets/dirt.png";
 import a_door from "./assets/door.png";
 import a_electric from "./assets/electric.png";
+import a_ghost_block from "./assets/ghost_block.png";
 import a_hover from "./assets/hover.png";
 import a_ingot_diamond from "./assets/ingot_diamond.png";
 import a_ingot_iron from "./assets/ingot_iron.png";
@@ -30,18 +31,23 @@ import a_planks from "./assets/planks.png";
 import a_player from "./assets/player.png";
 import a_seeds from "./assets/seeds.png";
 import a_settings from "./assets/settings.png";
+import a_shiny_metal from "./assets/shiny_metal.png";
 import a_stick from "./assets/stick.png";
 import a_stone from "./assets/stone.png";
 import a_stone_axe from "./assets/stone_axe.png";
 import a_stone_hoe from "./assets/stone_hoe.png";
 import a_stone_pickaxe from "./assets/stone_pickaxe.png";
 import a_stone_sword from "./assets/stone_sword.png";
+import a_stormcaller from "./assets/stormcaller.png";
+import a_super_sword from "./assets/super_sword.png";
 import a_torch from "./assets/torch.png";
 import a_wheat from "./assets/wheat.png";
 import a_wood_axe from "./assets/wood_axe.png";
 import a_wood_hoe from "./assets/wood_hoe.png";
 import a_wood_pickaxe from "./assets/wood_pickaxe.png";
 import a_wood_sword from "./assets/wood_sword.png";
+import a_xp from "./assets/xp.png";
+import a_zombie from "./assets/zombie.png";
 
 export const SPRITE_URLS: Record<string, string> = {
   bed: a_bed,
@@ -58,6 +64,7 @@ export const SPRITE_URLS: Record<string, string> = {
   dirt: a_dirt,
   door: a_door,
   electric: a_electric,
+  ghost_block: a_ghost_block,
   hover: a_hover,
   ingot_diamond: a_ingot_diamond,
   ingot_iron: a_ingot_iron,
@@ -75,16 +82,21 @@ export const SPRITE_URLS: Record<string, string> = {
   player: a_player,
   seeds: a_seeds,
   settings: a_settings,
+  shiny_metal: a_shiny_metal,
   stick: a_stick,
   stone: a_stone,
   stone_axe: a_stone_axe,
   stone_hoe: a_stone_hoe,
   stone_pickaxe: a_stone_pickaxe,
   stone_sword: a_stone_sword,
+  stormcaller: a_stormcaller,
+  super_sword: a_super_sword,
   torch: a_torch,
   wheat: a_wheat,
   wood_axe: a_wood_axe,
   wood_hoe: a_wood_hoe,
   wood_pickaxe: a_wood_pickaxe,
   wood_sword: a_wood_sword,
+  xp: a_xp,
+  zombie: a_zombie,
 };

@@ -147,6 +147,10 @@ function Play() {
               <div className="clock">
                 Day {hud.day} · {hud.night ? "Night" : "Day"}
               </div>
+              <div className="xp-chip" aria-label="XP" title="XP: dropped by zombies">
+                <img className="ico" src={SPRITE_URLS["xp"]} alt="" draggable={false} />
+                <span>XP {hud.xp}</span>
+              </div>
               <div className="hud-right">
                 <button className="btn small" onClick={() => g?.togglePause()}>
                   Menu
@@ -158,6 +162,15 @@ function Play() {
                 </div>
               </div>
             </div>
+
+            {hud.boss && (
+              <div className="boss-bar" aria-label="Stormcaller health">
+                <span className="boss-name">Stormcaller</span>
+                <div className="boss-track">
+                  <span className="boss-fill" style={{ width: Math.max(0, Math.min(100, (hud.boss.hp / hud.boss.max) * 100)) + "%" }} />
+                </div>
+              </div>
+            )}
 
             {hud.toast && <div className="toast">{hud.toast}</div>}
 
