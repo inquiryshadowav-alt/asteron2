@@ -36,6 +36,7 @@ import {
   type BossMove,
   type Facing,
 } from "./boss";
+import { playBossSpawn, unlockAudio } from "./audio";
 import { InputMap } from "./input";
 import { World, writeSave, type Layer, type WorldSave } from "./world";
 import {
@@ -347,6 +348,9 @@ export class Game {
     this.input.onPause = () => this.togglePause();
     this.input.onInventory = () => this.toggleInventory();
     this.canvas.addEventListener("pointerdown", this.onPointer);
+    // browsers only allow sound after a tap or key press: the first one wakes the audio up for later
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
     this.last = performance.now();
     const loop = (t: number) => {
       const dt = Math.min(0.05, (t - this.last) / 1000);
@@ -362,6 +366,8 @@ export class Game {
     cancelAnimationFrame(this.raf);
     this.input.detach(window);
     this.canvas.removeEventListener("pointerdown", this.onPointer);
+    window.removeEventListener("pointerdown", unlockAudio);
+    window.removeEventListener("keydown", unlockAudio);
     this.save();
   }
 
@@ -1299,6 +1305,7 @@ export class Game {
     const tile = this.world.get(tx, ty);
     if (tile.obj === "ghost_block") this.world.set(tx, ty, { ...tile, obj: undefined, pt: undefined });
     this.ghostSeen.delete(tx + "," + ty);
+    playBossSpawn(); // the horror sting: exactly once per boss, at the moment it appears
     this.say("The Stormcaller rises!");
   }
 
