@@ -5,6 +5,7 @@ import {
   GHOST_CYCLE,
   GHOST_WARN,
   beamHits,
+  bossFacing,
   ghostCycle,
   ghostWarning,
   lightningTile,
@@ -133,5 +134,24 @@ describe("boss numbers", () => {
     expect(BOSS.hp).toBeGreaterThan(100);
     expect(BOSS.pauseMin).toBe(3);
     expect(BOSS.pauseMax).toBe(7);
+  });
+});
+
+describe("boss facing", () => {
+  it("looks the way it moves", () => {
+    expect(bossFacing("left", 2, 0, false)).toBe("right");
+    expect(bossFacing("right", -2, 0, false)).toBe("left");
+  });
+
+  it("keeps its facing when it is barely moving", () => {
+    expect(bossFacing("left", 0.1, 5, false)).toBe("left");
+    expect(bossFacing("right", -0.1, -5, false)).toBe("right");
+  });
+
+  it("looks at the player while it aims, whichever way it drifts", () => {
+    expect(bossFacing("left", -3, 4, true)).toBe("right");
+    expect(bossFacing("right", 3, -4, true)).toBe("left");
+    // player straight above or below: no turning
+    expect(bossFacing("left", 0, 0.1, true)).toBe("left");
   });
 });

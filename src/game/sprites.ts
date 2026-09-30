@@ -433,8 +433,9 @@ export function drawGhostGlow(c: Ctx, x: number, baseY: number, S: number, warn:
  * The boss, centred on x, wrapped in a glowing green aura (the flames themselves are particles the
  * engine spawns around it). `rise` goes 0 -> 1 while it climbs out of the Ghost Block.
  */
-export function drawBoss(c: Ctx, cx: number, baseY: number, S: number, flash: boolean, bob: number, rise: number, time: number) {
-  const img = sprite("stormcaller");
+export function drawBoss(c: Ctx, cx: number, baseY: number, S: number, flash: boolean, bob: number, rise: number, time: number, face: "left" | "right" = "left") {
+  const skin = face === "right" ? "stormcaller_right" : "stormcaller";
+  const img = sprite(skin);
   const lift = S * (0.5 + 0.09 * Math.sin(bob));
   const w = S * 3.7;
   const h = img ? (img.naturalHeight / img.naturalWidth) * w : w;
@@ -454,7 +455,7 @@ export function drawBoss(c: Ctx, cx: number, baseY: number, S: number, flash: bo
   c.globalCompositeOperation = "source-over";
   c.globalAlpha = Math.min(1, 0.25 + rise * 0.75);
   if (img) {
-    const src = flash ? redVersion("stormcaller", img) : null;
+    const src = flash ? redVersion(skin, img) : null;
     c.drawImage(src ?? img, cx - w / 2, top, w, h);
   } else {
     px(c, cx - w / 4, top, w / 2, h, flash ? "#e64444" : "#2a1a3a");

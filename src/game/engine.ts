@@ -23,8 +23,10 @@ import {
 import {
   BOSS,
   BOSS_LOOT,
+  BOSS_TURN_COOLDOWN,
   GHOST_RANGE,
   beamHits,
+  bossFacing,
   ghostCycle,
   ghostWarning,
   lightningTile,
@@ -32,6 +34,7 @@ import {
   pickMoves,
   snapDir8,
   type BossMove,
+  type Facing,
 } from "./boss";
 import { InputMap } from "./input";
 import { World, writeSave, type Layer, type WorldSave } from "./world";
@@ -180,6 +183,10 @@ interface Boss {
   queue: BossMove[];
   hurt: number;
   bob: number;
+  /** which skin it wears: it looks the way it moves, and at the player while it aims */
+  face: Facing;
+  /** seconds until it is allowed to turn again */
+  turn: number;
 }
 
 /** a laser that has just fired: a fixed line, so it never follows the player */
@@ -1285,7 +1292,7 @@ export class Game {
   private summonBoss(x: number, y: number) {
     if (this.boss || this.dead) return;
     if (Math.hypot(this.x - x, this.y - y) > GHOST_RANGE) return;
-    this.boss = { x, y, hp: BOSS.hp, max: BOSS.hp, state: "emerge", t: BOSS.emergeTime, move: null, queue: [], hurt: 0, bob: 0 };
+    this.boss = { x, y, hp: BOSS.hp, max: BOSS.hp, state: "emerge", t: BOSS.emergeTime, move: null, queue: [], hurt: 0, bob: 0, face: x < this.x ? "right" : "left", turn: 0 };
     // the block is spent: each Ghost Block summons exactly one Stormcaller, then it is gone
     const tx = Math.floor(x);
     const ty = Math.floor(y);
@@ -1343,6 +1350,7 @@ export class Game {
     const scale = this.difficulty === "hard" ? 1.35 : 1;
     b.bob += dt * 2.4;
     if (b.hurt > 0) b.hurt -= dt;
+    const startX = b.x;
     const dx = this.x - b.x;
     const dy = this.y - b.y;
     const dist = Math.hypot(dx, dy) || 0.0001;
@@ -1408,6 +1416,15 @@ export class Game {
         b.t -= dt;
         if (b.t <= 0) this.nextBossMove(b);
         break;
+    }
+
+    // turn to face the way it moves (or the player, while it aims), but not more than once per cooldown
+    b.turn -= dt;
+    const aiming = b.state === "emerge" || b.state === "windup" || b.state === "approach";
+    const face = bossFacing(b.face, dt > 0 ? (b.x - startX) / dt : 0, this.x - b.x, aiming);
+    if (face !== b.face && b.turn <= 0) {
+      b.face = face;
+      b.turn = BOSS_TURN_COOLDOWN;
     }
 
     this.updateBossCasts(dt, scale);
@@ -1631,7 +1648,7 @@ export class Game {
       const bx = boss.x * S - camX;
       const bby = boss.y * S - camY + S * 0.35;
       const rise = boss.state === "emerge" ? 1 - boss.t / BOSS.emergeTime : 1;
-      draws.push({ baseY: bby, fn: () => drawBoss(c, bx, bby, S, boss.hurt > 0, boss.bob, rise, this.time) });
+      draws.push({ baseY: bby, fn: () => drawBoss(c, bx, bby, S, boss.hurt > 0, boss.bob, rise, this.time, boss.face) });
     }
     const psx = this.x * S - camX - S / 2;
     const pby = this.y * S - camY + S * 0.35;

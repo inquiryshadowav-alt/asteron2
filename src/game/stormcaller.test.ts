@@ -327,6 +327,68 @@ describe("Stormcaller health and vision", () => {
   });
 });
 
+describe("Stormcaller facing skin", () => {
+  it("has a skin for each direction", () => {
+    expect(SPRITE_URLS["stormcaller"]).toBeTruthy();
+    expect(SPRITE_URLS["stormcaller_right"]).toBeTruthy();
+    expect(SPRITE_URLS["stormcaller_right"]).not.toBe(SPRITE_URLS["stormcaller"]);
+  });
+
+  it("rises facing the player", () => {
+    const g = makeGame();
+    priv(g).summonBoss(20.5, 5.5); // player is to the west
+    expect(priv(g).boss.face).toBe("left");
+    const h = makeGame();
+    priv(h).summonBoss(-10.5, 5.5); // player is to the east
+    expect(priv(h).boss.face).toBe("right");
+  });
+
+  it("faces right when it moves right and left when it moves left", () => {
+    const g = makeGame();
+    g.x = 20.5;
+    g.y = 5.5;
+    const b = spawnBoss(g, 5.5, 5.5); // boss far west of the player: it drifts east
+    b.face = "left";
+    step(g, 1);
+    expect(b.x).toBeGreaterThan(5.5);
+    expect(b.face).toBe("right");
+
+    g.x = -20.5; // the player is now far to the west: it turns round and heads that way
+    step(g, 3);
+    expect(b.face).toBe("left");
+  });
+
+  it("looks at the player while winding up an attack", () => {
+    const g = makeGame();
+    g.x = 15.5;
+    g.y = 5.5;
+    const b = spawnBoss(g, 10.5, 5.5);
+    b.face = "left";
+    priv(g).beginWindup(b, "laser");
+    step(g, 0.1);
+    expect(b.face).toBe("right"); // player is to its right
+  });
+
+  it("does not flip-flop: turns are spaced out", () => {
+    const g = makeGame();
+    const b = spawnBoss(g, 10.5, 5.5);
+    let turns = 0;
+    let last = b.face;
+    for (let i = 0; i < 200; i++) {
+      g.x = 10.5 + (i % 2 ? 5 : -5); // player jumps from side to side every frame
+      b.state = "windup";
+      b.move = "laser";
+      b.t = 99;
+      step(g, 0.05);
+      if (b.face !== last) {
+        turns++;
+        last = b.face;
+      }
+    }
+    expect(turns).toBeLessThanOrEqual(Math.ceil(10 / 0.35) + 1);
+  });
+});
+
 describe("Stormcaller moves", () => {
   it("laser: hits a player standing on one of the 8 lines", () => {
     const g = makeGame();

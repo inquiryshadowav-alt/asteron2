@@ -39,6 +39,7 @@ import a_stone_hoe from "./assets/stone_hoe.png";
 import a_stone_pickaxe from "./assets/stone_pickaxe.png";
 import a_stone_sword from "./assets/stone_sword.png";
 import a_stormcaller from "./assets/stormcaller.png";
+import a_stormcaller_right from "./assets/stormcaller_right.png";
 import a_super_sword from "./assets/super_sword.png";
 import a_torch from "./assets/torch.png";
 import a_wheat from "./assets/wheat.png";
@@ -90,6 +91,7 @@ export const SPRITE_URLS: Record<string, string> = {
   stone_pickaxe: a_stone_pickaxe,
   stone_sword: a_stone_sword,
   stormcaller: a_stormcaller,
+  stormcaller_right: a_stormcaller_right,
   super_sword: a_super_sword,
   torch: a_torch,
   wheat: a_wheat,

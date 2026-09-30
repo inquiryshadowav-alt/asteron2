@@ -118,3 +118,26 @@ export function lightningTile(px: number, py: number, rng: Rng = Math.random, ok
   }
   return last;
 }
+
+// ---------- facing ----------
+
+/** which way the boss looks: it has a left-facing and a right-facing skin */
+export type Facing = "left" | "right";
+
+/**
+ * Which skin the boss should wear. While it is winding up or firing it looks at the player; the
+ * rest of the time it looks the way it is moving (moving right -> face right, moving left -> face
+ * left). Below a small speed / offset it keeps whatever it was facing, so it never flickers.
+ *
+ * @param cur       the skin it has now
+ * @param moveVx    its horizontal speed in tiles per second (positive = moving right)
+ * @param toPlayerDx horizontal offset from the boss to the player (positive = player is to the right)
+ * @param aiming    true while it is emerging, winding up or attacking
+ */
+export function bossFacing(cur: Facing, moveVx: number, toPlayerDx: number, aiming: boolean): Facing {
+  if (aiming) return Math.abs(toPlayerDx) > 0.3 ? (toPlayerDx > 0 ? "right" : "left") : cur;
+  return Math.abs(moveVx) > 0.3 ? (moveVx > 0 ? "right" : "left") : cur;
+}
+
+/** the minimum time (seconds) between two turns, so orbiting around the player doesn't make it flip-flop */
+export const BOSS_TURN_COOLDOWN = 0.35;
