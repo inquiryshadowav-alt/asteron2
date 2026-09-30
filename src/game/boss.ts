@@ -34,12 +34,16 @@ export function ghostWarning(placedAt: number, time: number): number {
 // ---------- boss stats ----------
 
 export const BOSS = {
-  hp: 320,
+  hp: 960, // 200% more than the original 320
   /** drift speed between attacks / dash speed when closing in for a Storm Blast (tiles per second) */
   driftSpeed: 1.5,
   dashSpeed: 6,
   /** it hovers around this far from the player while it isn't attacking */
   hoverDist: 4.5,
+  /** while the Stormcaller is alive and this close (tiles), the player's vision shrinks to a small circle */
+  visionRange: 16,
+  /** how far (in tiles) the player can see inside that range */
+  visionRadius: 4.5,
   emergeTime: 1.4,
   recoverTime: 0.6,
   pauseMin: 3,

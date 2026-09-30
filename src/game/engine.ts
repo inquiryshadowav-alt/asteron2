@@ -1286,6 +1286,12 @@ export class Game {
     if (this.boss || this.dead) return;
     if (Math.hypot(this.x - x, this.y - y) > GHOST_RANGE) return;
     this.boss = { x, y, hp: BOSS.hp, max: BOSS.hp, state: "emerge", t: BOSS.emergeTime, move: null, queue: [], hurt: 0, bob: 0 };
+    // the block is spent: each Ghost Block summons exactly one Stormcaller, then it is gone
+    const tx = Math.floor(x);
+    const ty = Math.floor(y);
+    const tile = this.world.get(tx, ty);
+    if (tile.obj === "ghost_block") this.world.set(tx, ty, { ...tile, obj: undefined, pt: undefined });
+    this.ghostSeen.delete(tx + "," + ty);
     this.say("The Stormcaller rises!");
   }
 
@@ -1664,7 +1670,9 @@ export class Game {
     let dark = darknessAt(tod) * 0.62;
     if (this.sleeping > 0) dark = Math.max(dark, 1 - this.sleeping / 1.6 < 0.5 ? 0.95 : 0.95);
     const cave = this.inCave();
-    if (dark > 0 || cave) this.drawDarkness(c, W, H, S, camX, camY, dark, cave);
+    // near the Stormcaller you only see a small circle around yourself
+    const fog = !!this.boss && Math.hypot(this.boss.x - this.x, this.boss.y - this.y) < BOSS.visionRange;
+    if (dark > 0 || cave || fog) this.drawDarkness(c, W, H, S, camX, camY, dark, cave || fog, fog && !cave ? BOSS.visionRadius : 3.4);
 
     if (this.hurtFlash > 0) {
       const a = Math.min(0.55, this.hurtFlash);
@@ -1718,7 +1726,7 @@ export class Game {
    * Night tint and cave darkness are drawn on their own layer so torches can cut holes in it:
    * everything within a torch's radius is lit, with a soft edge and a little flicker.
    */
-  private drawDarkness(c: CanvasRenderingContext2D, W: number, H: number, S: number, camX: number, camY: number, dark: number, cave: boolean) {
+  private drawDarkness(c: CanvasRenderingContext2D, W: number, H: number, S: number, camX: number, camY: number, dark: number, cave: boolean, litTiles = 3.4) {
     if (typeof document === "undefined") return;
     if (!this.lightCv) this.lightCv = document.createElement("canvas");
     const lc = this.lightCv;
@@ -1738,7 +1746,7 @@ export class Game {
       // only a small circle around the player is lit
       const cx = W / 2;
       const cy = H / 2;
-      const lit = S * 3.4;
+      const lit = S * litTiles;
       const gr = g.createRadialGradient(cx, cy, lit * 0.35, cx, cy, lit);
       gr.addColorStop(0, "rgba(4,4,8,0)");
       gr.addColorStop(0.65, "rgba(4,4,8,0.72)");

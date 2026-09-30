@@ -254,16 +254,30 @@ describe("Ghost Block spawn mechanics", () => {
     expect(priv(g).boss).not.toBeNull();
   });
 
-  it("summons again every cycle once the last boss is gone", () => {
+  it("is used up by its summon: the block disappears and never summons a second boss", () => {
     const g = makeGame();
     placeGhost(g);
     step(g, GHOST_CYCLE + 0.1);
     expect(priv(g).boss).not.toBeNull();
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.world.get(6, 5).pt).toBeUndefined();
     priv(g).boss.hp = 1;
     priv(g).killBoss();
+    step(g, GHOST_CYCLE * 3);
     expect(priv(g).boss).toBeNull();
+  });
+
+  it("keeps its block when it could not summon (player too far away) and tries the next pulse", () => {
+    const g = makeGame();
+    placeGhost(g);
+    g.x = 6.5 + GHOST_RANGE + 5;
+    step(g, GHOST_CYCLE + 0.1);
+    expect(priv(g).boss).toBeNull();
+    expect(g.world.get(6, 5).obj).toBe("ghost_block");
+    g.x = 5.5;
     step(g, GHOST_CYCLE);
     expect(priv(g).boss).not.toBeNull();
+    expect(g.world.get(6, 5).obj).toBeUndefined();
   });
 
   it("never runs two bosses at once", () => {
@@ -273,6 +287,8 @@ describe("Ghost Block spawn mechanics", () => {
     step(g, GHOST_CYCLE + 0.1);
     expect(priv(g).boss).not.toBeNull();
     const first = priv(g).boss;
+    // only the block that actually summoned is spent; the other stays for a later fight
+    expect([g.world.get(6, 5).obj, g.world.get(8, 5).obj].filter((o) => o === "ghost_block")).toHaveLength(1);
     step(g, GHOST_CYCLE);
     expect(priv(g).boss).toBe(first);
   });
@@ -293,6 +309,21 @@ describe("Ghost Block spawn mechanics", () => {
     g.x = 6.5 + GHOST_RANGE + 5;
     step(g, GHOST_CYCLE + 0.1);
     expect(priv(g).boss).toBeNull();
+  });
+});
+
+describe("Stormcaller health and vision", () => {
+  it("has 200% more HP than the original 320", () => {
+    expect(BOSS.hp).toBe(320 * 3);
+    const g = makeGame();
+    const b = spawnBoss(g, 20.5, 5.5);
+    expect(b.hp).toBe(960);
+    expect(b.max).toBe(960);
+  });
+
+  it("shrinks vision to a small circle inside the boss's range", () => {
+    expect(BOSS.visionRadius).toBeLessThan(BOSS.visionRange);
+    expect(BOSS.visionRadius).toBeGreaterThan(0);
   });
 });
 
@@ -710,7 +741,7 @@ describe("the whole loop", () => {
     expect(g.countPublic("shiny_metal")).toBe(5);
     g.craft("super_sword");
     expect(g.countPublic("super_sword")).toBe(1);
-    // and the block is still there, still unbreakable
-    expect(g.world.get(6, 5).obj).toBe("ghost_block");
+    // the block was spent by its one summon
+    expect(g.world.get(6, 5).obj).toBeUndefined();
   });
 });
