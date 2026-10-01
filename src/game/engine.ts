@@ -216,6 +216,8 @@ interface Beam {
   len: number;
   life: number;
   hit: boolean;
+  /** cast by the player's Super Sword: drawn on top of the darkness so it is always seen in full */
+  own?: boolean;
 }
 
 /** lightning: a warning on a tile, then the strike */
@@ -227,6 +229,8 @@ interface Bolt {
   /** seconds the bolt stays visible after landing (0 while still warning) */
   strike: number;
   seed: number;
+  /** cast by the player's Super Sword: drawn on top of the darkness so it is always seen in full */
+  own?: boolean;
 }
 
 /** a full day is 7 minutes of daylight followed by 7 minutes of night */
@@ -296,7 +300,7 @@ export class Game {
   beams: Beam[] = [];
   bolts: Bolt[] = [];
   /** Storm Blast shockwaves, for drawing */
-  bursts: { x: number; y: number; t: number }[] = [];
+  bursts: { x: number; y: number; t: number; own?: boolean }[] = [];
   /** knockback the player is still carrying, in tiles per second */
   kx = 0;
   ky = 0;
@@ -879,7 +883,9 @@ export class Game {
         const power = sword === "super" ? sel?.power : undefined;
         if (sword) this.wear("sword");
         else if (heldTool) this.wear(heldTool.type);
-        if (target && power) this.castSwordPower(power, target);
+        if (power && (target || bossTarget)) this.castSwordPower(power, target ?? bossTarget!);
+        // the ability can also land on the Stormcaller standing near the mob that was hit
+        if (this.boss && this.boss.hp <= 0) this.killBoss();
         if (target && !this.mobs.includes(target)) {
           // already killed by the ability
         } else if (target) {
@@ -891,7 +897,7 @@ export class Game {
           if (target.hp <= 0) this.killMob(target);
         } else if (bossTarget) {
           bossTarget.hurt = 0.25; // a flash, no knockback: it does not flinch
-          if (bossTarget.hp <= 0) this.killBoss();
+          if (bossTarget.hp <= 0 && this.boss === bossTarget) this.killBoss();
         }
       }
       this.mining = 0;
@@ -1677,15 +1683,24 @@ export class Game {
    * laser (a beam along the swing that pierces every mob in line). It never harms the player and never
    * breaks anything the player built; it only hurts mobs.
    */
-  private castSwordPower(power: SwordPower, target: Mob) {
+  private castSwordPower(power: SwordPower, target: { x: number; y: number }) {
+    // `pad` widens the reach for the Stormcaller, whose body is much bigger than a mob's
+    let reach: (o: { x: number; y: number }, pad: number) => boolean;
+    let dmg: number;
+    let from: { x: number; y: number } | undefined;
     if (power === "lightning") {
       const lx = target.x;
       const ly = target.y;
-      this.bolts.push({ tx: Math.floor(lx), ty: Math.floor(ly), warn: 0, strike: BOSS.lightning.life, seed: Math.random() * 100 });
-      this.zapMobs((o) => Math.hypot(o.x - lx, o.y - ly) <= BOSS.lightning.radius, BOSS.mobDmg.lightning);
+      this.bolts.push({ tx: Math.floor(lx), ty: Math.floor(ly), warn: 0, strike: BOSS.lightning.life, seed: Math.random() * 100, own: true });
+      reach = (o, pad) => Math.hypot(o.x - lx, o.y - ly) <= BOSS.lightning.radius + pad;
+      dmg = BOSS.mobDmg.lightning;
     } else if (power === "storm") {
-      this.bursts.push({ x: this.x, y: this.y, t: 0.4 });
-      this.zapMobs((o) => Math.hypot(o.x - this.x, o.y - this.y) < BOSS.storm.radius, BOSS.mobDmg.storm, { x: this.x, y: this.y });
+      const px = this.x;
+      const py = this.y;
+      this.bursts.push({ x: px, y: py, t: 0.4, own: true });
+      reach = (o, pad) => Math.hypot(o.x - px, o.y - py) < BOSS.storm.radius + pad;
+      dmg = BOSS.mobDmg.storm;
+      from = { x: px, y: py };
     } else {
       const dx = this.dir === "left" ? -1 : this.dir === "right" ? 1 : 0;
       const dy = this.dir === "up" ? -1 : this.dir === "down" ? 1 : 0;
@@ -1698,8 +1713,18 @@ export class Game {
         }
       }
       // hit: true so the beam can never damage the player who fired it
-      this.beams.push({ x: this.x, y: this.y, dx, dy, len, life: BOSS.laser.life, hit: true });
-      this.zapMobs((o) => beamHits(this.x, this.y, dx, dy, len, BOSS.laser.halfWidth, o.x, o.y), BOSS.mobDmg.laser);
+      this.beams.push({ x: this.x, y: this.y, dx, dy, len, life: BOSS.laser.life, hit: true, own: true });
+      const px = this.x;
+      const py = this.y;
+      reach = (o, pad) => beamHits(px, py, dx, dy, len, BOSS.laser.halfWidth + pad, o.x, o.y);
+      dmg = BOSS.mobDmg.laser;
+    }
+    this.zapMobs((o) => reach(o, 0), dmg, from);
+    // the Stormcaller takes the hit too (it is never flung away: it does not flinch)
+    const b = this.boss;
+    if (b && b.state !== "emerge" && reach(b, 1.2)) {
+      b.hp -= dmg;
+      b.hurt = 0.25;
     }
   }
 
@@ -1899,8 +1924,9 @@ export class Game {
     draws.forEach((d) => d.fn());
 
     if (boss) this.drawBossEffects(c, boss, S, camX, camY);
-    // lightning, beams and shockwaves are drawn with or without a boss: Super Sword abilities use them too
-    this.drawCastEffects(c, S, camX, camY);
+    // the boss's own attacks sit under the darkness (its blackout hides what is far away); a Super
+    // Sword's lightning, beam and shockwave are drawn again on top of it, below, so they always show
+    this.drawCastEffects(c, S, camX, camY, false);
 
     // arrows
     c.fillStyle = "#e8e8e0";
@@ -1933,6 +1959,8 @@ export class Game {
     // while the Stormcaller lives the world goes black: you see only the circle around yourself
     const fog = !!this.boss;
     if (dark > 0 || cave || fog) this.drawDarkness(c, W, H, S, camX, camY, dark, cave, 3.4, fog);
+    // Super Sword abilities: above night, cave and boss darkness, so the bolt is never dimmed or cut off
+    this.drawCastEffects(c, S, camX, camY, true);
 
     if (this.hurtFlash > 0) {
       const a = Math.min(0.55, this.hurtFlash);
@@ -1966,19 +1994,19 @@ export class Game {
   }
 
   /** the lightning, beams and shockwaves in the air: the boss's and the Super Sword's, boss or no boss */
-  private drawCastEffects(c: CanvasRenderingContext2D, S: number, camX: number, camY: number) {
+  private drawCastEffects(c: CanvasRenderingContext2D, S: number, camX: number, camY: number, own: boolean) {
     const lift = S * 0.6;
     const sx = (wx: number) => wx * S - camX;
     const sy = (wy: number) => wy * S - camY;
-    for (const burst of this.bursts) drawStormBurst(c, sx(burst.x), sy(burst.y), BOSS.storm.radius * S, 1 - burst.t / 0.4);
-    for (const bolt of this.bolts) {
+    for (const burst of this.bursts.filter((x) => !!x.own === own)) drawStormBurst(c, sx(burst.x), sy(burst.y), BOSS.storm.radius * S, 1 - burst.t / 0.4);
+    for (const bolt of this.bolts.filter((x) => !!x.own === own)) {
       const cx = sx(bolt.tx + 0.5);
       const cy = sy(bolt.ty + 0.5);
       if (bolt.warn > 0) drawLightningWarning(c, cx, cy, BOSS.lightning.radius * S, 1 - bolt.warn / BOSS.lightning.windup, this.time);
       // the bolt always runs from the very top of the screen down to where it lands, however tall the screen is
       else drawLightningBolt(c, cx, cy, Math.max(S * 8, cy + S), bolt.strike / BOSS.lightning.life, bolt.seed, S * 0.55);
     }
-    for (const beam of this.beams) {
+    for (const beam of this.beams.filter((x) => !!x.own === own)) {
       const len = beam.len;
       const fade = beam.life / BOSS.laser.life;
       drawBeam(

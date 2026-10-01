@@ -753,13 +753,14 @@ describe("Shiny Metal and the Super Sword", () => {
     expect(d).toBeUndefined();
   });
 
-  it("does 40 damage to the boss", () => {
+  it("does 40 damage to the boss, plus its ability's damage", () => {
     const g = makeGame();
     hold(g, "super_sword");
+    g.slots[g.hotbar]!.power = "lightning";
     const b = spawnBoss(g, 6.5, 5.5);
     priv(g).input.held["use"] = true;
     priv(g).useLogic(0.016);
-    expect(b.hp).toBe(BOSS.hp - 40);
+    expect(b.hp).toBe(BOSS.hp - 40 - BOSS.mobDmg.lightning);
   });
 });
 
@@ -929,7 +930,8 @@ describe("Super Sword effects without a boss", () => {
         set: () => true,
       },
     ) as unknown as CanvasRenderingContext2D;
-    priv(g).drawCastEffects(ctx, 32, 0, 0);
+    priv(g).drawCastEffects(ctx, 32, 0, 0, false);
+    priv(g).drawCastEffects(ctx, 32, 0, 0, true);
     expect(calls.length).toBeGreaterThan(0);
   });
 });
@@ -937,7 +939,7 @@ describe("Super Sword effects without a boss", () => {
 describe("lightning bolt height", () => {
   it("reaches the top edge of the screen wherever it lands, on a tall screen too", () => {
     const g = makeGame();
-    priv(g).bolts.push({ tx: 6, ty: 5, warn: 0, strike: 0.4, seed: 3 });
+    priv(g).bolts.push({ tx: 6, ty: 5, warn: 0, strike: 0.4, seed: 3, own: true });
     const S = 32;
     const camY = 5.5 * S - 700; // lands 700px down the screen, far below an 8-tile (256px) bolt
     let minY = Infinity;
@@ -953,7 +955,69 @@ describe("lightning bolt height", () => {
         set: () => true,
       },
     ) as unknown as CanvasRenderingContext2D;
-    priv(g).drawCastEffects(ctx, S, 0, camY);
+    priv(g).drawCastEffects(ctx, S, 0, camY, true);
     expect(minY).toBeLessThanOrEqual(0);
+  });
+});
+
+describe("Super Sword in real play", () => {
+  function swordGame(power: "lightning" | "storm" | "laser") {
+    const g = makeGame();
+    // a sword from an older save: no ability yet, it is rolled when the world loads
+    priv(g).slots[0] = priv(g).restoreSlot({ id: "super_sword", n: 1, dur: 100 }, 4);
+    priv(g).slots[0].power = power;
+    g.hotbar = 0;
+    g.x = 5.5;
+    g.y = 5.5;
+    g.dir = "right";
+    return g;
+  }
+  const addMob = (g: Game, x: number, y: number, hp = 500) => {
+    const m = { kind: "insect", x, y, hp, hurt: 0, flee: 0, vx: 0, vy: 0, bob: 0, flash: 0 };
+    priv(g).mobs.push(m);
+    return m;
+  };
+
+  it("works through the normal game loop at night, no boss", () => {
+    const g = swordGame("lightning");
+    g.time = 2 * 420 + 0.8 * 420; // deep night
+    const m = addMob(g, 6.4, 5.5);
+    priv(g).input.held["use"] = true;
+    priv(g).input.pressedUse = true;
+    for (let i = 0; i < 4; i++) priv(g).update(0.05);
+    expect(m.hp).toBeLessThan(500 - SWORD_DAMAGE.super);
+    expect(priv(g).bolts.some((b: { own?: boolean }) => b.own)).toBe(true);
+  });
+
+  it("draws the sword's effects above the darkness, and never mixes them with the boss's", () => {
+    const g = swordGame("storm");
+    priv(g).bolts.push({ tx: 6, ty: 5, warn: 0, strike: 0.4, seed: 1, own: true });
+    priv(g).bolts.push({ tx: 9, ty: 5, warn: 0, strike: 0.4, seed: 2 });
+    let strokes = 0;
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_t, prop) => (prop === "stroke" ? () => void strokes++ : typeof prop === "string" && prop !== "then" ? () => (prop.startsWith("create") ? { addColorStop: () => {} } : undefined) : undefined),
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    priv(g).drawCastEffects(ctx, 32, 0, 0, true);
+    const ownStrokes = strokes;
+    priv(g).drawCastEffects(ctx, 32, 0, 0, false);
+    expect(ownStrokes).toBeGreaterThan(0);
+    expect(strokes).toBe(ownStrokes * 2); // one bolt each pass, so the same stroke count twice
+  });
+
+  it("also hits the Stormcaller", () => {
+    const g = swordGame("lightning");
+    const b = spawnBoss(g, 7.4, 5.5);
+    b.state = "recover";
+    b.t = 5;
+    const hp = b.hp;
+    priv(g).input.held["use"] = true;
+    priv(g).input.pressedUse = true;
+    priv(g).hitCool = 0;
+    priv(g).useLogic(0.016);
+    expect(hp - b.hp).toBeGreaterThan(SWORD_DAMAGE.super);
   });
 });
