@@ -42,7 +42,7 @@ import {
 } from "./boss";
 import { playBossSpawn, unlockAudio } from "./audio";
 import { InputMap } from "./input";
-import { World, writeSave, type Layer, type WorldSave } from "./world";
+import { World, writeSave, loadBedSpawn, saveBedSpawn, clearBedSpawn, type Layer, type WorldSave } from "./world";
 import {
   drawBeam,
   drawBoss,
@@ -685,6 +685,37 @@ export class Game {
     return pts.every((p) => this.world.walkable(Math.floor(p[0]!), Math.floor(p[1]!)));
   }
 
+  /** the solid tiles the player's body currently overlaps (non-empty only if a block was placed on them) */
+  private blockedTiles(x: number, y: number) {
+    const h = 0.32;
+    const out = new Set<string>();
+    for (const [px, py] of [
+      [x - h, y - h],
+      [x + h, y - h],
+      [x - h, y + h],
+      [x + h, y + h],
+    ] as const) {
+      const tx = Math.floor(px);
+      const ty = Math.floor(py);
+      if (!this.world.walkable(tx, ty)) out.add(tx + "," + ty);
+    }
+    return out;
+  }
+
+  /**
+   * Normal collision, plus an escape hatch: if a block was placed on top of the player, they are
+   * overlapping a solid tile and canStand() would reject every step. A step is still allowed when
+   * it only touches solid tiles the player is already inside, so they can walk out of it, but
+   * never deeper into a wall and never into a different solid tile.
+   */
+  private canMove(x: number, y: number) {
+    if (this.canStand(x, y)) return true;
+    const now = this.blockedTiles(this.x, this.y);
+    if (now.size === 0) return false;
+    for (const k of this.blockedTiles(x, y)) if (!now.has(k)) return false;
+    return true;
+  }
+
   private facing() {
     const dx = this.dir === "left" ? -1 : this.dir === "right" ? 1 : 0;
     const dy = this.dir === "up" ? -1 : this.dir === "down" ? 1 : 0;
@@ -756,17 +787,17 @@ export class Game {
       const len = Math.hypot(mx, my) || 1;
       const nx = this.x + (mx / len) * SPEED * dt;
       const ny = this.y + (my / len) * SPEED * dt;
-      if (this.canStand(nx, this.y)) this.x = nx;
-      if (this.canStand(this.x, ny)) this.y = ny;
+      if (this.canMove(nx, this.y)) this.x = nx;
+      if (this.canMove(this.x, ny)) this.y = ny;
     }
 
     // knockback (Storm Blast): slides the player away, stopped by walls, fading fast
     if (this.kx || this.ky) {
       const nx = this.x + this.kx * dt;
       const ny = this.y + this.ky * dt;
-      if (this.canStand(nx, this.y)) this.x = nx;
+      if (this.canMove(nx, this.y)) this.x = nx;
       else this.kx = 0;
-      if (this.canStand(this.x, ny)) this.y = ny;
+      if (this.canMove(this.x, ny)) this.y = ny;
       else this.ky = 0;
       const decay = Math.max(0, 1 - 5 * dt);
       this.kx = Math.abs(this.kx * decay) < 0.05 ? 0 : this.kx * decay;
@@ -873,6 +904,8 @@ export class Game {
       if (this.boss) this.say("You can't sleep while the Stormcaller is here");
       else if (this.isNight()) {
         this.sleeping = 1.6;
+        // waking up here from now on: dying sends the player back to this bed
+        saveBedSpawn(this.saveId, { x: tx, y: ty, layer: this.world.layer });
         this.say("Sleeping...");
       } else this.say("You can only sleep at night");
       return;
@@ -1669,12 +1702,25 @@ export class Game {
     this.hurtFlash = 0.5;
   }
 
-  respawn() {
-    // dying in the caves must respawn on the surface, not at a random spot inside the rock
-    if (this.world.layer !== "surface") {
-      this.world = new World(this.world.seed, this.surfaceChanges, "surface");
+  /** where to come back after dying: the last bed slept in (if it still stands), else the world origin (0, 0, 0) */
+  private respawnSpot(): { x: number; y: number; layer: Layer } {
+    const bed = loadBedSpawn(this.saveId);
+    if (bed) {
+      const changes = bed.layer === "under" ? this.underChanges : this.surfaceChanges;
+      const probe = this.world.layer === bed.layer ? this.world : new World(this.world.seed, changes, bed.layer);
+      const obj = probe.get(bed.x, bed.y).obj;
+      if (obj === "bed" || obj === "bed2") return { x: bed.x + 0.5, y: bed.y + 0.5, layer: bed.layer };
+      clearBedSpawn(this.saveId); // the bed was broken: forget it
     }
-    const spot = this.findSpawn();
+    return { x: this.originX + 0.5, y: this.originY + 0.5, layer: "surface" };
+  }
+
+  respawn() {
+    const spot = this.respawnSpot();
+    if (this.world.layer !== spot.layer) {
+      const changes = spot.layer === "under" ? this.underChanges : this.surfaceChanges;
+      this.world = new World(this.world.seed, changes, spot.layer);
+    }
     this.x = spot.x;
     this.y = spot.y;
     this.hp = MAX_HP;

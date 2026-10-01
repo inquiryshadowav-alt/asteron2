@@ -1058,3 +1058,78 @@ describe("tools specialize: fast at their own job, slow at everything else", () 
     priv(g).input.held["use"] = false;
   });
 });
+
+describe("placing a block under yourself", () => {
+  it("lets the player walk out of a block placed on their own feet, but not into other walls", () => {
+    const g = makeGame();
+    g.x = 5.9; // body reaches into tile 6, the facing tile
+    g.y = 5.5;
+    g.world.set(6, 5, { t: "grass", obj: "block_stone" }); // block lands partly under the player
+    expect(priv(g).canStand(g.x, g.y)).toBe(false);
+    priv(g).input.held["left"] = true;
+    const x0 = g.x;
+    priv(g).update(0.05);
+    expect(g.x).toBeLessThan(x0); // free to walk away
+    for (let i = 0; i < 20; i++) priv(g).update(0.05);
+    expect(priv(g).canStand(g.x, g.y)).toBe(true); // fully out
+    // collision is still on: walking back into the block is blocked
+    priv(g).input.held["left"] = false;
+    priv(g).input.held["right"] = true;
+    for (let i = 0; i < 40; i++) priv(g).update(0.05);
+    expect(g.x).toBeLessThan(6 - 0.32 + 1e-6);
+  });
+});
+
+describe("bed respawn", () => {
+  function stubStorage() {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    return store;
+  }
+
+  it("respawns at the origin when no bed was ever slept in", () => {
+    stubStorage();
+    const g = makeGame();
+    g.x = 20.5;
+    g.y = 20.5;
+    g.dead = true;
+    g.respawn();
+    expect(g.x).toBe(priv(g).originX + 0.5);
+    expect(g.y).toBe(priv(g).originY + 0.5);
+    vi.unstubAllGlobals();
+  });
+
+  it("remembers the bed slept in and respawns there after dying", () => {
+    const store = stubStorage();
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", obj: "bed" });
+    g.world.set(7, 5, { t: "grass", obj: "bed2" });
+    g.time = DAY_LEN * 2 + 0.7 * DAY_LEN;
+    priv(g).input.pressedUse = true;
+    priv(g).useLogic(0.016);
+    expect(g.sleeping).toBeGreaterThan(0);
+    expect(store.get("mc2d.spawn.test")).toBeDefined();
+    g.x = 30.5;
+    g.y = 30.5;
+    g.dead = true;
+    g.respawn();
+    expect(Math.floor(g.x)).toBe(6);
+    expect(Math.floor(g.y)).toBe(5);
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to the origin and forgets the record if the bed was broken", () => {
+    const store = stubStorage();
+    const g = makeGame();
+    store.set("mc2d.spawn.test", JSON.stringify({ x: 40, y: 40, layer: "surface" }));
+    g.dead = true;
+    g.respawn();
+    expect(g.x).toBe(priv(g).originX + 0.5);
+    expect(store.has("mc2d.spawn.test")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});

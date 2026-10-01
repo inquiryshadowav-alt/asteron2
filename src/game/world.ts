@@ -331,3 +331,39 @@ export function writeSave(id: string, save: WorldSave) {
     /* storage full — ignore */
   }
 }
+
+const SPAWN_PREFIX = "mc2d.spawn.";
+
+/** the last bed the player slept in: tile + layer, kept in localStorage per world */
+export interface BedSpawn {
+  x: number;
+  y: number;
+  layer: Layer;
+}
+
+export function loadBedSpawn(id: string): BedSpawn | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const s = safeParse<BedSpawn | null>(localStorage.getItem(SPAWN_PREFIX + id), null);
+    if (s && Number.isFinite(s.x) && Number.isFinite(s.y) && (s.layer === "surface" || s.layer === "under")) return s;
+  } catch {
+    /* storage unavailable */
+  }
+  return null;
+}
+
+export function saveBedSpawn(id: string, spawn: BedSpawn) {
+  try {
+    localStorage.setItem(SPAWN_PREFIX + id, JSON.stringify(spawn));
+  } catch {
+    /* storage full or unavailable: the spawn just isn't remembered */
+  }
+}
+
+export function clearBedSpawn(id: string) {
+  try {
+    localStorage.removeItem(SPAWN_PREFIX + id);
+  } catch {
+    /* ignore */
+  }
+}
