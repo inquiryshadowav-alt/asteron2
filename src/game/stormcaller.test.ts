@@ -933,3 +933,27 @@ describe("Super Sword effects without a boss", () => {
     expect(calls.length).toBeGreaterThan(0);
   });
 });
+
+describe("lightning bolt height", () => {
+  it("reaches the top edge of the screen wherever it lands, on a tall screen too", () => {
+    const g = makeGame();
+    priv(g).bolts.push({ tx: 6, ty: 5, warn: 0, strike: 0.4, seed: 3 });
+    const S = 32;
+    const camY = 5.5 * S - 700; // lands 700px down the screen, far below an 8-tile (256px) bolt
+    let minY = Infinity;
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_t, prop) =>
+          prop === "lineTo" || prop === "moveTo"
+            ? (_x: number, y: number) => void (minY = Math.min(minY, y))
+            : typeof prop === "string" && prop !== "then"
+              ? () => (prop.startsWith("create") ? { addColorStop: () => {} } : undefined)
+              : undefined,
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    priv(g).drawCastEffects(ctx, S, 0, camY);
+    expect(minY).toBeLessThanOrEqual(0);
+  });
+});

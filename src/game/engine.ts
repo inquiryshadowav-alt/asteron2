@@ -1975,7 +1975,8 @@ export class Game {
       const cx = sx(bolt.tx + 0.5);
       const cy = sy(bolt.ty + 0.5);
       if (bolt.warn > 0) drawLightningWarning(c, cx, cy, BOSS.lightning.radius * S, 1 - bolt.warn / BOSS.lightning.windup, this.time);
-      else drawLightningBolt(c, cx, cy, S * 8, bolt.strike / BOSS.lightning.life, bolt.seed, S * 0.55);
+      // the bolt always runs from the very top of the screen down to where it lands, however tall the screen is
+      else drawLightningBolt(c, cx, cy, Math.max(S * 8, cy + S), bolt.strike / BOSS.lightning.life, bolt.seed, S * 0.55);
     }
     for (const beam of this.beams) {
       const len = beam.len;

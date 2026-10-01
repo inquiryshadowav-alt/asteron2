@@ -564,7 +564,8 @@ export function drawLightningBolt(c: Ctx, x: number, y: number, height: number, 
   c.save();
   c.globalAlpha = Math.max(0, Math.min(1, alpha));
   const pts: [number, number][] = [[x, y]];
-  const n = 9;
+  // a tall bolt needs more kinks, or it would look like a straight pole: about one zig-zag per ~1.8 bolt widths
+  const n = Math.max(9, Math.min(48, Math.round(height / (r * 1.8))));
   for (let i = 1; i <= n; i++) {
     const t = i / n;
     const jitter = (hash(i, seed, 5) - 0.5) * r * 1.3 * (1 - t * 0.2);
