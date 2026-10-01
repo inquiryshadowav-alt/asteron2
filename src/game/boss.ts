@@ -1,8 +1,8 @@
 // The Stormcaller boss and the Ghost Block that summons it: pure data and pure helpers, no DOM,
 // so every rule here can be unit-tested without an engine or a canvas.
 
-export type BossMove = "laser" | "storm" | "lightning";
-export const BOSS_MOVES: readonly BossMove[] = ["laser", "storm", "lightning"];
+export type BossMove = "laser" | "storm" | "lightning" | "swarm";
+export const BOSS_MOVES: readonly BossMove[] = ["laser", "storm", "lightning", "swarm"];
 
 /** a source of numbers in [0, 1): Math.random in the game, a fixed sequence in tests */
 export type Rng = () => number;
@@ -34,23 +34,28 @@ export function ghostWarning(placedAt: number, time: number): number {
 // ---------- boss stats ----------
 
 export const BOSS = {
-  hp: 960, // 200% more than the original 320
+  hp: 2880, // 3x the previous 960 (which was 3x the original 320)
   /** drift speed between attacks / dash speed when closing in for a Storm Blast (tiles per second) */
   driftSpeed: 1.5,
   dashSpeed: 6,
   /** it hovers around this far from the player while it isn't attacking */
-  hoverDist: 4.5,
-  /** while the Stormcaller is alive and this close (tiles), the player's vision shrinks to a small circle */
-  visionRange: 16,
-  /** how far (in tiles) the player can see inside that range */
+  hoverDist: 3.2,
+  /**
+   * While the Stormcaller is alive the world goes black: the player sees only inside a circle of this
+   * many tiles around themselves. No torch, glow or distance makes anything outside it visible.
+   */
   visionRadius: 4.5,
   emergeTime: 1.4,
   recoverTime: 0.6,
   pauseMin: 3,
   pauseMax: 7,
-  laser: { windup: 1.0, length: 16, halfWidth: 0.55, life: 0.35, dmg: 16 },
+  laser: { windup: 1.0, length: 16, halfWidth: 0.55, life: 0.35, dmg: 16, /** it smashes this many obstacles, then it is spent */ pierce: 2 },
   storm: { windup: 1.1, radius: 2.8, dmg: 20, knock: 10, closeIn: 1.9, dashTimeout: 3 },
   lightning: { windup: 0.9, life: 0.4, radius: 1.05, dmg: 18, maxOff: 3 },
+  /** the Swarm Spawner: small night mobs pour out even in broad daylight and hunt the player until killed */
+  swarm: { windup: 1.3, count: 5, hardCount: 7, maxAlive: 12, ring: 1.4 },
+  /** what its attacks do to every other mob they touch (the swarm itself is never hurt) */
+  mobDmg: { laser: 30, storm: 40, lightning: 35 },
 } as const;
 
 /** what a victory drops */
@@ -141,3 +146,46 @@ export function bossFacing(cur: Facing, moveVx: number, toPlayerDx: number, aimi
 
 /** the minimum time (seconds) between two turns, so orbiting around the player doesn't make it flip-flop */
 export const BOSS_TURN_COOLDOWN = 0.35;
+
+// ---------- the swarm ----------
+
+/** the little attackers the Swarm Spawner makes */
+export const SWARMLING = { hp: 14, speed: 2.4, dmg: 4 } as const;
+
+// ---------- the boss and the world ----------
+
+/** what the Stormcaller's attacks cannot break: the land itself, the ways into the caves, and the Ghost Block */
+const SPARED = new Set(["mountain", "cave_entrance", "cave_exit", "ghost_block"]);
+
+/** can its attacks destroy whatever stands on a tile? trees, crops, doors and anything the player built */
+export function bossBreaks(obj: string | undefined): boolean {
+  return !!obj && !SPARED.has(obj);
+}
+
+/** every tile a laser sweeps through, nearest first, each once, with how far along the beam it is */
+export function beamTiles(bx: number, by: number, dx: number, dy: number, len: number, halfWidth: number, from = 0.8): { tx: number; ty: number; d: number }[] {
+  const out: { tx: number; ty: number; d: number }[] = [];
+  const seen = new Set<string>();
+  for (let d = from; d <= len; d += 0.25) {
+    for (const off of [0, halfWidth * 0.8, -halfWidth * 0.8]) {
+      const tx = Math.floor(bx + dx * d - dy * off);
+      const ty = Math.floor(by + dy * d + dx * off);
+      const k = tx + "," + ty;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ tx, ty, d });
+    }
+  }
+  return out;
+}
+
+/** the tiles whose centre lies within `r` of a point */
+export function tilesInCircle(cx: number, cy: number, r: number): { tx: number; ty: number }[] {
+  const out: { tx: number; ty: number }[] = [];
+  for (let tx = Math.floor(cx - r); tx <= Math.floor(cx + r); tx++) {
+    for (let ty = Math.floor(cy - r); ty <= Math.floor(cy + r); ty++) {
+      if (Math.hypot(tx + 0.5 - cx, ty + 0.5 - cy) <= r) out.push({ tx, ty });
+    }
+  }
+  return out;
+}

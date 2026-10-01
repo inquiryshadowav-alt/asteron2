@@ -5,6 +5,8 @@ import {
   GHOST_CYCLE,
   GHOST_WARN,
   beamHits,
+  beamTiles,
+  bossBreaks,
   bossFacing,
   ghostCycle,
   ghostWarning,
@@ -12,6 +14,7 @@ import {
   pauseSeconds,
   pickMoves,
   snapDir8,
+  tilesInCircle,
   type Rng,
 } from "./boss";
 
@@ -40,7 +43,7 @@ describe("Ghost Block pulse", () => {
 });
 
 describe("combat cycle", () => {
-  it("picks 2 different moves out of the 3, in a random order", () => {
+  it("picks 2 different moves out of the 4, in a random order", () => {
     const seen = new Set<string>();
     for (let i = 0; i < 300; i++) {
       const [a, b] = pickMoves();
@@ -49,13 +52,14 @@ describe("combat cycle", () => {
       expect(BOSS_MOVES).toContain(b);
       seen.add(a + ">" + b);
     }
-    // all 6 ordered pairs turn up eventually
-    expect(seen.size).toBe(6);
+    // all 12 ordered pairs turn up eventually
+    expect(seen.size).toBe(12);
+    expect([...seen].some((p) => p.includes("swarm"))).toBe(true);
   });
 
   it("follows the random numbers it is given", () => {
     expect(pickMoves(seq(0, 0))).toEqual(["laser", "storm"]);
-    expect(pickMoves(seq(0.99, 0.99))).toEqual(["lightning", "storm"]);
+    expect(pickMoves(seq(0.99, 0.99))).toEqual(["swarm", "lightning"]);
   });
 
   it("pauses 3 to 7 seconds between pairs", () => {
@@ -153,5 +157,33 @@ describe("boss facing", () => {
     expect(bossFacing("right", 3, -4, true)).toBe("left");
     // player straight above or below: no turning
     expect(bossFacing("left", 0, 0.1, true)).toBe("left");
+  });
+});
+
+describe("the boss and the world", () => {
+  it("breaks trees, crops, doors and player-built blocks, but not the land or the Ghost Block", () => {
+    for (const o of ["tree", "tall_grass", "crop0", "crop3", "door_closed", "door_open", "bed", "block_stone", "block_wood", "block_diamond", "block_dirt"]) {
+      expect(bossBreaks(o), o).toBe(true);
+    }
+    for (const o of ["mountain", "cave_entrance", "cave_exit", "ghost_block"]) expect(bossBreaks(o), o).toBe(false);
+    expect(bossBreaks(undefined)).toBe(false);
+  });
+
+  it("lists each tile a laser crosses once, nearest first", () => {
+    const tiles = beamTiles(10.5, 10.5, 1, 0, 8, 0.55);
+    expect(tiles.map((t) => t.d)).toEqual([...tiles.map((t) => t.d)].sort((a, b) => a - b));
+    expect(new Set(tiles.map((t) => t.tx + "," + t.ty)).size).toBe(tiles.length);
+    expect(tiles.some((t) => t.tx === 14 && t.ty === 10)).toBe(true);
+    expect(tiles.every((t) => t.tx >= 11)).toBe(true); // nothing behind the boss
+    // a diagonal beam crosses diagonal tiles
+    const diag = beamTiles(10.5, 10.5, Math.SQRT1_2, Math.SQRT1_2, 8, 0.55);
+    expect(diag.some((t) => t.tx === 14 && t.ty === 14)).toBe(true);
+  });
+
+  it("finds the tiles inside a circle by their centres", () => {
+    const t = tilesInCircle(10.5, 10.5, 1.05);
+    const keys = new Set(t.map((x) => x.tx + "," + x.ty));
+    expect(keys).toEqual(new Set(["10,10", "9,10", "11,10", "10,9", "10,11"]));
+    expect(tilesInCircle(10.5, 10.5, 2.8).length).toBeGreaterThan(20);
   });
 });

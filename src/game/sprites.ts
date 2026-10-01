@@ -321,13 +321,13 @@ export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: n
 }
 
 /** every bot (player included) floats a little above its shadow */
-function drawBot(c: Ctx, key: string, x: number, baseY: number, S: number, bob: number, hurt: boolean) {
+function drawBot(c: Ctx, key: string, x: number, baseY: number, S: number, bob: number, hurt: boolean, scale = 1) {
   const cx = x + S / 2;
   shadow(c, cx, baseY, S);
   const img = sprite(key);
   const lift = S * (0.18 + 0.05 * Math.sin(bob));
   if (img) {
-    const w = S * 1.15;
+    const w = S * 1.15 * scale;
     const h = (img.naturalHeight / img.naturalWidth) * w;
     const src = hurt ? redVersion(key, img) : null;
     const dx = cx - w / 2;
@@ -354,10 +354,14 @@ export const MOB_SPRITE: Record<string, string> = {
   electric: "electric",
   creeper: "creeper",
   zombie: "zombie",
+  swarmling: "swarmling",
 };
 
+/** how big each kind is drawn, next to the usual 1.0: the swarm is small */
+const MOB_SCALE: Record<string, number> = { swarmling: 0.62 };
+
 export function drawMob(c: Ctx, kind: string, x: number, baseY: number, S: number, flash: boolean, bob = 0) {
-  drawBot(c, MOB_SPRITE[kind] ?? "insect", x, baseY, S, bob, flash);
+  drawBot(c, MOB_SPRITE[kind] ?? "insect", x, baseY, S, bob, flash, MOB_SCALE[kind] ?? 1);
 }
 
 // ---------- torch ----------
@@ -581,5 +585,26 @@ export function drawLightningBolt(c: Ctx, x: number, y: number, height: number, 
   gr.addColorStop(1, "rgba(150,180,255,0)");
   c.fillStyle = gr;
   c.fillRect(x - r * 1.5, y - r * 1.5, r * 3, r * 3);
+  c.restore();
+}
+
+/** the Swarm Spawner winding up: a ring of green runes spins faster and brighter around the boss (`p` 0 -> 1) */
+export function drawSwarmWarning(c: Ctx, x: number, y: number, r: number, p: number, time: number) {
+  c.save();
+  c.fillStyle = `rgba(40,200,70,${0.08 + 0.14 * p})`;
+  c.beginPath();
+  c.arc(x, y, r, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = `rgba(110,255,140,${0.5 + 0.4 * p})`;
+  c.lineWidth = 3;
+  c.beginPath();
+  c.arc(x, y, r, 0, Math.PI * 2);
+  c.stroke();
+  const spin = time * (2 + p * 6);
+  c.fillStyle = `rgba(190,255,200,${0.6 + 0.4 * p})`;
+  for (let i = 0; i < 8; i++) {
+    const a = spin + (i * Math.PI) / 4;
+    c.fillRect(x + Math.cos(a) * r * 0.82 - 3, y + Math.sin(a) * r * 0.82 - 3, 6, 6);
+  }
   c.restore();
 }

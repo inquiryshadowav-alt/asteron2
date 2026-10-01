@@ -24,8 +24,11 @@ import {
   BOSS,
   BOSS_LOOT,
   BOSS_TURN_COOLDOWN,
+  SWARMLING,
   GHOST_RANGE,
   beamHits,
+  beamTiles,
+  bossBreaks,
   bossFacing,
   ghostCycle,
   ghostWarning,
@@ -33,6 +36,7 @@ import {
   pauseSeconds,
   pickMoves,
   snapDir8,
+  tilesInCircle,
   type BossMove,
   type Facing,
 } from "./boss";
@@ -52,6 +56,7 @@ import {
   drawPlayer,
   drawStormBurst,
   drawStormWarning,
+  drawSwarmWarning,
   drawTorch,
   preloadSprites,
 } from "./sprites";
@@ -87,7 +92,7 @@ export interface Hud {
   boss: { hp: number; max: number } | null;
 }
 
-type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper" | "zombie";
+type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper" | "zombie" | "swarmling";
 
 interface MobDef {
   hp: number;
@@ -113,6 +118,8 @@ const MOBS: Record<MobKind, MobDef> = {
   creeper: { hp: 30, speed: 1.5, range: 12, dmg: 22, hostile: true, explodes: true },
   // slow, sturdy, and the only source of XP
   zombie: { hp: 40, speed: 1.35, range: 12, dmg: 7, hostile: true, drop: { id: "xp", n: 1 } },
+  // the Stormcaller's swarm: small, quick, always hunting, and worth nothing when killed
+  swarmling: { hp: SWARMLING.hp, speed: SWARMLING.speed, range: 80, dmg: SWARMLING.dmg, hostile: true },
 };
 
 interface Mob {
@@ -130,6 +137,8 @@ interface Mob {
   hurt: number;
   bob: number;
   cave: boolean;
+  /** made by the Stormcaller: it ignores daylight, is never hurt by the boss, and vanishes when the boss does */
+  minion?: boolean;
 }
 
 /** the two colours of the pixel burst when each kind of mob dies */
@@ -142,6 +151,7 @@ const MOB_FX: Record<MobKind, [string, string]> = {
   electric: ["#ffcf2e", "#fff7a0"],
   creeper: ["#3f8a2a", "#9be25a"],
   zombie: ["#4f8a3a", "#b9f27a"],
+  swarmling: ["#5a2f8a", "#6dff8a"],
 };
 
 /** a square pixel of a visual effect; x / y are in world tiles */
@@ -196,6 +206,8 @@ interface Beam {
   y: number;
   dx: number;
   dy: number;
+  /** how far it reached: it stops short once it has smashed through enough obstacles */
+  len: number;
   life: number;
   hit: boolean;
 }
@@ -1148,8 +1160,8 @@ export class Game {
 
   private trySpawn() {
     const night = this.isNight() || this.inCave();
-    const hostile = this.mobs.filter((m) => MOBS[m.kind].hostile).length;
-    const passive = this.mobs.length - hostile;
+    const hostile = this.mobs.filter((m) => MOBS[m.kind].hostile && !m.minion).length;
+    const passive = this.mobs.filter((m) => !MOBS[m.kind].hostile).length;
     const maxHostile = night ? (this.difficulty === "hard" ? 12 : 6) : 0;
     const maxPassive = 8;
     const kinds: MobKind[] = night
@@ -1268,7 +1280,7 @@ export class Game {
     if (!this.isNight()) {
       // cave dwellers survive daylight — their cave stays dark all day
       this.mobs = this.mobs.filter(
-        (m) => !MOBS[m.kind].hostile || m.cave || this.inCave(m.x, m.y) || Math.hypot(m.x - this.x, m.y - this.y) < 6,
+        (m) => m.minion || !MOBS[m.kind].hostile || m.cave || this.inCave(m.x, m.y) || Math.hypot(m.x - this.x, m.y - this.y) < 6,
       );
     }
     this.mobs = this.mobs.filter((m) => Math.hypot(m.x - this.x, m.y - this.y) < 40);
@@ -1311,6 +1323,9 @@ export class Game {
 
   /** the fight is over (or reset): the boss and everything it cast are gone */
   private clearBoss() {
+    // the swarm belongs to the boss: when it falls, resets or gives up, its minions crumble with it
+    for (const m of this.mobs) if (m.minion) this.deathFx(m);
+    this.mobs = this.mobs.filter((m) => !m.minion);
     this.boss = null;
     this.beams = [];
     this.bolts = [];
@@ -1469,9 +1484,27 @@ export class Game {
     if (m === "laser") {
       // aimed at where the player stands right now, snapped to one of the 8 directions; it never homes
       const dir = snapDir8(this.x - b.x, this.y - b.y);
-      this.beams.push({ x: b.x, y: b.y, dx: dir.dx, dy: dir.dy, life: BOSS.laser.life, hit: false });
+      // it smashes whatever it passes through (trees, crops, anything the player built) but runs out of
+      // force after a couple of things, and a mountain stops it dead: so a wall makes real cover, once
+      let len: number = BOSS.laser.length;
+      let left: number = BOSS.laser.pierce;
+      for (const { tx, ty, d } of beamTiles(b.x, b.y, dir.dx, dir.dy, BOSS.laser.length, BOSS.laser.halfWidth)) {
+        if (this.world.get(tx, ty).obj === "mountain") {
+          len = d;
+          break;
+        }
+        if (this.smashTile(tx, ty) && --left <= 0) {
+          len = d + 0.4;
+          break;
+        }
+      }
+      this.beams.push({ x: b.x, y: b.y, dx: dir.dx, dy: dir.dy, len, life: BOSS.laser.life, hit: false });
+      this.harmMobs((o) => beamHits(b.x, b.y, dir.dx, dir.dy, len, BOSS.laser.halfWidth, o.x, o.y), BOSS.mobDmg.laser);
     } else if (m === "storm") {
       this.bursts.push({ x: b.x, y: b.y, t: 0.4 });
+      // the shockwave flattens everything in its circle and flings other mobs away
+      for (const { tx, ty } of tilesInCircle(b.x, b.y, BOSS.storm.radius)) this.smashTile(tx, ty);
+      this.harmMobs((o) => Math.hypot(o.x - b.x, o.y - b.y) < BOSS.storm.radius, BOSS.mobDmg.storm, { x: b.x, y: b.y });
       const dist = Math.hypot(this.x - b.x, this.y - b.y);
       if (dist < BOSS.storm.radius) {
         this.damage(BOSS.storm.dmg * scale);
@@ -1479,6 +1512,8 @@ export class Game {
         this.kx = Math.cos(a) * BOSS.storm.knock;
         this.ky = Math.sin(a) * BOSS.storm.knock;
       }
+    } else if (m === "swarm") {
+      this.spawnSwarm(b);
     }
     // lightning lands on its own timer (see updateBossCasts)
     b.state = "recover";
@@ -1486,11 +1521,82 @@ export class Game {
     b.t = BOSS.recoverTime;
   }
 
+  /** the Swarm Spawner: a burst of small attackers around the boss, in any weather, hunting the player */
+  private spawnSwarm(b: Boss) {
+    const want = this.difficulty === "hard" ? BOSS.swarm.hardCount : BOSS.swarm.count;
+    const room = BOSS.swarm.maxAlive - this.mobs.filter((m) => m.minion).length;
+    let made = 0;
+    for (let i = 0; i < 40 && made < Math.min(want, room); i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = BOSS.swarm.ring * (0.6 + Math.random() * 0.9);
+      const x = b.x + Math.cos(a) * r;
+      const y = b.y + Math.sin(a) * r;
+      if (!this.world.walkable(Math.floor(x), Math.floor(y))) continue;
+      this.mobs.push({
+        kind: "swarmling",
+        cave: false,
+        minion: true,
+        x,
+        y,
+        hp: MOBS.swarmling.hp,
+        vx: 0,
+        vy: 0,
+        wander: 0,
+        flee: 0,
+        cool: 0.6, // a moment to get their bearings before the first bite
+        fuse: 0,
+        flash: false,
+        hurt: 0,
+        bob: Math.random() * 6.28,
+      });
+      made++;
+    }
+    this.say("The Stormcaller calls its swarm!");
+  }
+
+  /** the boss smashes whatever stands on a tile (tree, crop, door, placed block, torch); true if something broke */
+  private smashTile(tx: number, ty: number): boolean {
+    const t = this.world.get(tx, ty);
+    const breaks = bossBreaks(t.obj);
+    if (!breaks && !t.torch) return false;
+    this.world.set(tx, ty, { ...t, obj: breaks ? undefined : t.obj, pt: breaks ? undefined : t.pt, torch: undefined });
+    const tree = t.obj === "tree" || t.obj === "tall_grass" || t.obj?.startsWith("crop");
+    const [a, b] = tree ? ["#3f8a2a", "#8a5a2c"] : ["#8a8a92", "#c9c9d2"];
+    for (let i = 0; i < 6; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const sp = 1.5 + Math.random() * 2.5;
+      const max = 0.4 + Math.random() * 0.35;
+      this.particles.push({ x: tx + 0.5, y: ty + 0.5, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 0.8, life: max, max, size: 3, grow: 0, color: i % 2 ? a : b });
+    }
+    return true;
+  }
+
+  /**
+   * Hurt every mob an attack touches, except the boss's own swarm. Kills pay nothing: the boss
+   * is not the player, so it cannot be used to farm XP or drops. `from` flings survivors away.
+   */
+  private harmMobs(inRange: (m: Mob) => boolean, dmg: number, from?: { x: number; y: number }) {
+    for (const m of [...this.mobs]) {
+      if (m.minion || !inRange(m)) continue;
+      m.hp -= dmg;
+      m.hurt = 0.35;
+      if (m.hp <= 0) {
+        this.mobs = this.mobs.filter((o) => o !== m);
+        this.deathFx(m);
+      } else if (from) {
+        const away = Math.atan2(m.y - from.y, m.x - from.x);
+        m.vx = Math.cos(away) * 6;
+        m.vy = Math.sin(away) * 6;
+        m.flee = 0.8;
+      }
+    }
+  }
+
   /** lasers, lightning and shockwaves already in the air */
   private updateBossCasts(dt: number, scale: number) {
     for (const beam of this.beams) {
       beam.life -= dt;
-      if (!beam.hit && beamHits(beam.x, beam.y, beam.dx, beam.dy, BOSS.laser.length, BOSS.laser.halfWidth, this.x, this.y)) {
+      if (!beam.hit && beamHits(beam.x, beam.y, beam.dx, beam.dy, beam.len, BOSS.laser.halfWidth, this.x, this.y)) {
         beam.hit = true;
         this.damage(BOSS.laser.dmg * scale);
       }
@@ -1502,6 +1608,10 @@ export class Game {
         bolt.warn -= dt;
         if (bolt.warn <= 0) {
           bolt.strike = BOSS.lightning.life;
+          const lx = bolt.tx + 0.5;
+          const ly = bolt.ty + 0.5;
+          for (const { tx, ty } of tilesInCircle(lx, ly, BOSS.lightning.radius)) this.smashTile(tx, ty);
+          this.harmMobs((o) => Math.hypot(o.x - lx, o.y - ly) <= BOSS.lightning.radius, BOSS.mobDmg.lightning);
           if (Math.hypot(this.x - (bolt.tx + 0.5), this.y - (bolt.ty + 0.5)) <= BOSS.lightning.radius) this.damage(BOSS.lightning.dmg * scale);
         }
       } else bolt.strike -= dt;
@@ -1694,9 +1804,9 @@ export class Game {
     let dark = darknessAt(tod) * 0.62;
     if (this.sleeping > 0) dark = Math.max(dark, 1 - this.sleeping / 1.6 < 0.5 ? 0.95 : 0.95);
     const cave = this.inCave();
-    // near the Stormcaller you only see a small circle around yourself
-    const fog = !!this.boss && Math.hypot(this.boss.x - this.x, this.boss.y - this.y) < BOSS.visionRange;
-    if (dark > 0 || cave || fog) this.drawDarkness(c, W, H, S, camX, camY, dark, cave || fog, fog && !cave ? BOSS.visionRadius : 3.4);
+    // while the Stormcaller lives the world goes black: you see only the circle around yourself
+    const fog = !!this.boss;
+    if (dark > 0 || cave || fog) this.drawDarkness(c, W, H, S, camX, camY, dark, cave, 3.4, fog);
 
     if (this.hurtFlash > 0) {
       const a = Math.min(0.55, this.hurtFlash);
@@ -1721,6 +1831,9 @@ export class Game {
     if (b.state === "windup" && b.move === "laser") {
       drawCharge(c, sx(b.x), sy(b.y) - lift, S, 1 - b.t / BOSS.laser.windup, this.time);
     }
+    if (b.move === "swarm" && b.state === "windup") {
+      drawSwarmWarning(c, sx(b.x), sy(b.y), S * 1.9, 1 - b.t / BOSS.swarm.windup, this.time);
+    }
     if (b.move === "storm" && b.state === "windup") {
       drawStormWarning(c, sx(b.x), sy(b.y), BOSS.storm.radius * S, 1 - b.t / BOSS.storm.windup);
     }
@@ -1732,7 +1845,7 @@ export class Game {
       else drawLightningBolt(c, cx, cy, S * 8, bolt.strike / BOSS.lightning.life, bolt.seed, S * 0.55);
     }
     for (const beam of this.beams) {
-      const len = BOSS.laser.length;
+      const len = beam.len;
       const fade = beam.life / BOSS.laser.life;
       drawBeam(
         c,
@@ -1750,7 +1863,7 @@ export class Game {
    * Night tint and cave darkness are drawn on their own layer so torches can cut holes in it:
    * everything within a torch's radius is lit, with a soft edge and a little flicker.
    */
-  private drawDarkness(c: CanvasRenderingContext2D, W: number, H: number, S: number, camX: number, camY: number, dark: number, cave: boolean, litTiles = 3.4) {
+  private drawDarkness(c: CanvasRenderingContext2D, W: number, H: number, S: number, camX: number, camY: number, dark: number, cave: boolean, litTiles = 3.4, fog = false) {
     if (typeof document === "undefined") return;
     if (!this.lightCv) this.lightCv = document.createElement("canvas");
     const lc = this.lightCv;
@@ -1766,7 +1879,18 @@ export class Game {
       g.fillStyle = `rgba(6,10,40,${dark})`;
       g.fillRect(0, 0, W, H);
     }
-    if (cave) {
+    if (fog) {
+      // the Stormcaller's darkness: pitch black everywhere except a circle around the player. No light of
+      // any kind (torches included) gets through, and nothing outside the circle can be seen at all.
+      const cx = W / 2;
+      const cy = H / 2;
+      const r = S * BOSS.visionRadius;
+      const gr = g.createRadialGradient(cx, cy, r * 0.8, cx, cy, r);
+      gr.addColorStop(0, "rgba(0,0,0,0)");
+      gr.addColorStop(1, "rgba(0,0,0,1)");
+      g.fillStyle = gr;
+      g.fillRect(0, 0, W, H);
+    } else if (cave) {
       // only a small circle around the player is lit
       const cx = W / 2;
       const cy = H / 2;
@@ -1790,7 +1914,7 @@ export class Game {
       const flicker = 1 + 0.045 * Math.sin(this.time * 8 + Number(tx) * 1.7 + Number(ty) * 2.3);
       lights.push({ x, y, r: R * flicker });
     }
-    if (this.sleeping > 0) lights.length = 0; // falling asleep blacks everything out, torches included
+    if (this.sleeping > 0 || fog) lights.length = 0; // falling asleep, or the Stormcaller's darkness, blacks out every light
     g.globalCompositeOperation = "destination-out";
     for (const l of lights) {
       const gr = g.createRadialGradient(l.x, l.y, l.r * 0.15, l.x, l.y, l.r);

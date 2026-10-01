@@ -312,18 +312,13 @@ describe("Ghost Block spawn mechanics", () => {
   });
 });
 
-describe("Stormcaller health and vision", () => {
-  it("has 200% more HP than the original 320", () => {
-    expect(BOSS.hp).toBe(320 * 3);
+describe("Stormcaller health", () => {
+  it("has 3x its previous HP (960 -> 2880)", () => {
+    expect(BOSS.hp).toBe(960 * 3);
     const g = makeGame();
     const b = spawnBoss(g, 20.5, 5.5);
-    expect(b.hp).toBe(960);
-    expect(b.max).toBe(960);
-  });
-
-  it("shrinks vision to a small circle inside the boss's range", () => {
-    expect(BOSS.visionRadius).toBeLessThan(BOSS.visionRange);
-    expect(BOSS.visionRadius).toBeGreaterThan(0);
+    expect(b.hp).toBe(2880);
+    expect(b.max).toBe(2880);
   });
 });
 
