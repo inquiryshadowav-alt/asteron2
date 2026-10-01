@@ -910,3 +910,26 @@ describe("Super Sword abilities", () => {
     expect(g.slots.find((x) => x?.id === "super_sword")!.power).toBe("storm");
   });
 });
+
+describe("Super Sword effects without a boss", () => {
+  it("draws the lightning, beam and shockwave even when no Stormcaller exists", () => {
+    const g = makeGame();
+    expect(priv(g).boss).toBeNull();
+    priv(g).bolts.push({ tx: 6, ty: 5, warn: 0, strike: 0.4, seed: 1 });
+    priv(g).beams.push({ x: 5.5, y: 5.5, dx: 1, dy: 0, len: 8, life: 0.3, hit: true });
+    priv(g).bursts.push({ x: 5.5, y: 5.5, t: 0.3 });
+    const calls: string[] = [];
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_t, prop) =>
+          typeof prop === "string" && prop !== "then"
+            ? (..._a: unknown[]) => (calls.push(prop), prop.startsWith("create") ? { addColorStop: () => {} } : undefined)
+            : undefined,
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    priv(g).drawCastEffects(ctx, 32, 0, 0);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+});

@@ -1899,6 +1899,8 @@ export class Game {
     draws.forEach((d) => d.fn());
 
     if (boss) this.drawBossEffects(c, boss, S, camX, camY);
+    // lightning, beams and shockwaves are drawn with or without a boss: Super Sword abilities use them too
+    this.drawCastEffects(c, S, camX, camY);
 
     // arrows
     c.fillStyle = "#e8e8e0";
@@ -1961,6 +1963,13 @@ export class Game {
     if (b.move === "storm" && b.state === "windup") {
       drawStormWarning(c, sx(b.x), sy(b.y), BOSS.storm.radius * S, 1 - b.t / BOSS.storm.windup);
     }
+  }
+
+  /** the lightning, beams and shockwaves in the air: the boss's and the Super Sword's, boss or no boss */
+  private drawCastEffects(c: CanvasRenderingContext2D, S: number, camX: number, camY: number) {
+    const lift = S * 0.6;
+    const sx = (wx: number) => wx * S - camX;
+    const sy = (wy: number) => wy * S - camY;
     for (const burst of this.bursts) drawStormBurst(c, sx(burst.x), sy(burst.y), BOSS.storm.radius * S, 1 - burst.t / 0.4);
     for (const bolt of this.bolts) {
       const cx = sx(bolt.tx + 0.5);
