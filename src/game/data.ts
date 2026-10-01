@@ -294,16 +294,17 @@ export const MINE_REQ = { stone: 1, coal: 1, iron: 2, diamond: 3 };
 // ---------- tool durability ----------
 
 /** how many uses a tool survives, by material */
-export const TOOL_USES: Record<Tier, number> = { wood: 22, stone: 33, iron: 47, diamond: 60, super: 100 };
+export const TOOL_USES: Record<Tier, number> = { wood: 22, stone: 33, iron: 47, diamond: 60, super: 22 };
 
 /** bumped whenever TOOL_USES changes; saves remember which version their tools were counted in */
-export const TOOLS_VERSION = 4;
+export const TOOLS_VERSION = 5;
 
 /** the tables of earlier versions, so an older save keeps the same amount of wear on its tools (1 = no version stored) */
 export const OLD_TOOL_USES: Record<number, Record<Tier, number>> = {
   1: { wood: 5, stone: 9, iron: 12, diamond: 20, super: 100 },
   2: { wood: 12, stone: 9, iron: 27, diamond: 40, super: 100 },
   3: { wood: 12, stone: 18, iron: 27, diamond: 40, super: 100 },
+  4: { wood: 22, stone: 33, iron: 47, diamond: 60, super: 100 },
 };
 
 /** max durability of an item, or undefined when it isn't a tool */
@@ -324,4 +325,27 @@ export function durabilityColor(ratio: number): string {
   if (ratio > 0.5) return "#4cc94c";
   if (ratio > 0.25) return "#e8952b";
   return "#d33b3b";
+}
+
+// ---------- Super Sword abilities ----------
+
+/** the Stormcaller moves a Super Sword can carry: lightning strike, storm blast (hit and push), laser */
+export type SwordPower = "lightning" | "storm" | "laser";
+export const SWORD_POWERS: readonly SwordPower[] = ["lightning", "storm", "laser"];
+
+/** odds of each ability when a Super Sword is made (must add up to 1) */
+export const SWORD_POWER_ODDS: Record<SwordPower, number> = { lightning: 0.9, storm: 0.07, laser: 0.03 };
+
+export const SWORD_POWER_NAMES: Record<SwordPower, string> = { lightning: "Lightning Strike", storm: "Storm Blast", laser: "Laser" };
+
+export function isSwordPower(v: unknown): v is SwordPower {
+  return v === "lightning" || v === "storm" || v === "laser";
+}
+
+/** roll a Super Sword's ability: 90% lightning, 7% storm blast, 3% laser */
+export function rollSwordPower(rng: () => number = Math.random): SwordPower {
+  const r = rng();
+  if (r < SWORD_POWER_ODDS.lightning) return "lightning";
+  if (r < SWORD_POWER_ODDS.lightning + SWORD_POWER_ODDS.storm) return "storm";
+  return "laser";
 }

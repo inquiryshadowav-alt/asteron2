@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Game } from "./engine";
 import { BOSS, BOSS_LOOT, GHOST_CYCLE, GHOST_RANGE } from "./boss";
-import { ITEMS, RECIPES, SWORD_DAMAGE } from "./data";
+import { ITEMS, RECIPES, SWORD_DAMAGE, TOOL_USES, rollSwordPower } from "./data";
 import { SPRITE_URLS } from "./sprite-assets";
 import { World } from "./world";
 
@@ -743,13 +743,13 @@ describe("Shiny Metal and the Super Sword", () => {
     expect(g.countPublic("shiny_metal")).toBe(0);
   });
 
-  it("hits harder than a diamond sword and lasts longer", () => {
+  it("hits harder than a diamond sword and wears out like a wooden sword", () => {
     expect(SWORD_DAMAGE.super).toBeGreaterThan(SWORD_DAMAGE.diamond);
     const g = makeGame();
     g.give("super_sword", 1);
     const s = g.slots.find((x) => x?.id === "super_sword")!;
     const d = g.slots.find((x) => x?.id === "diamond_sword");
-    expect(s.dur).toBeGreaterThan(60);
+    expect(s.dur).toBe(TOOL_USES.wood);
     expect(d).toBeUndefined();
   });
 
@@ -800,5 +800,113 @@ describe("the whole loop", () => {
     expect(g.countPublic("super_sword")).toBe(1);
     // the block was spent by its one summon
     expect(g.world.get(6, 5).obj).toBeUndefined();
+  });
+});
+
+describe("Super Sword abilities", () => {
+  function armed(power: "lightning" | "storm" | "laser") {
+    const g = makeGame();
+    g.give("super_sword", 1);
+    const slot = g.slots.find((x) => x?.id === "super_sword")!;
+    slot.power = power;
+    g.hotbar = g.slots.indexOf(slot);
+    g.x = 5.5;
+    g.y = 5.5;
+    g.dir = "right";
+    return g;
+  }
+  function mob(g: Game, x: number, y: number, hp = 500) {
+    const m = { kind: "insect", x, y, hp, hurt: 0, flee: 0, vx: 0, vy: 0 };
+    priv(g).mobs.push(m);
+    return m;
+  }
+  function swing(g: Game) {
+    priv(g).input.held["use"] = true;
+    priv(g).input.pressedUse = true;
+    priv(g).hitCool = 0;
+    priv(g).useLogic(0.016);
+    priv(g).input.held["use"] = false;
+  }
+
+  it("rolls 90% lightning, 7% storm blast and 3% laser", () => {
+    expect(rollSwordPower(() => 0)).toBe("lightning");
+    expect(rollSwordPower(() => 0.899)).toBe("lightning");
+    expect(rollSwordPower(() => 0.9)).toBe("storm");
+    expect(rollSwordPower(() => 0.969)).toBe("storm");
+    expect(rollSwordPower(() => 0.97)).toBe("laser");
+    expect(rollSwordPower(() => 0.999)).toBe("laser");
+  });
+
+  it("every newly made Super Sword gets an ability", () => {
+    const g = makeGame();
+    g.give("super_sword", 1);
+    expect(g.slots.find((x) => x?.id === "super_sword")!.power).toBeDefined();
+  });
+
+  it("lightning strikes the mob that was hit and its neighbours, not the player", () => {
+    const g = armed("lightning");
+    const a = mob(g, 6.5, 5.5);
+    const b = mob(g, 7.0, 5.5);
+    const far = mob(g, 12.5, 5.5);
+    const hp = g.hp;
+    swing(g);
+    expect(a.hp).toBeLessThan(500 - SWORD_DAMAGE.super);
+    expect(b.hp).toBeLessThan(500);
+    expect(far.hp).toBe(500);
+    expect(g.hp).toBe(hp);
+    expect(priv(g).bolts.length).toBe(1);
+  });
+
+  it("storm blast hurts and pushes mobs around the player", () => {
+    const g = armed("storm");
+    const a = mob(g, 6.5, 5.5);
+    const side = mob(g, 5.5, 7.0);
+    swing(g);
+    expect(side.hp).toBeLessThan(500);
+    expect(side.vy).toBeGreaterThan(0); // flung away from the player
+    expect(a.hp).toBeLessThan(500 - SWORD_DAMAGE.super);
+  });
+
+  it("laser pierces every mob in line and never hurts the player", () => {
+    const g = armed("laser");
+    const a = mob(g, 6.5, 5.5);
+    const behind = mob(g, 11.5, 5.5);
+    const off = mob(g, 11.5, 8.5);
+    const hp = g.hp;
+    swing(g);
+    expect(behind.hp).toBeLessThan(500);
+    expect(off.hp).toBe(500);
+    expect(a.hp).toBeLessThan(500);
+    for (let i = 0; i < 40; i++) priv(g).update(0.05);
+    expect(g.hp).toBeGreaterThanOrEqual(hp);
+    expect(priv(g).beams.length).toBe(0); // fades out with no boss around
+  });
+
+  it("an ability kill pays out like a normal kill", () => {
+    const g = armed("lightning");
+    mob(g, 6.5, 5.5, 1);
+    swing(g);
+    expect(priv(g).mobs.length).toBe(0);
+  });
+
+  it("an ability-less (old) Super Sword gets one when the world loads, and keeps one it has", () => {
+    const g = makeGame();
+    const s1 = priv(g).restoreSlot({ id: "super_sword", n: 1, dur: 100 }, 4);
+    expect(["lightning", "storm", "laser"]).toContain(s1.power);
+    expect(s1.dur).toBe(22); // full life stays full under the new, shorter life
+    const s2 = priv(g).restoreSlot({ id: "super_sword", n: 1, dur: 50, power: "laser" });
+    expect(s2.power).toBe("laser");
+    expect(s2.dur).toBeLessThanOrEqual(22);
+  });
+
+  it("the ability survives being picked up and put back", () => {
+    const g = armed("storm");
+    const i = g.hotbar;
+    g.clickSlot(i); // pick up
+    g.toggleInventory();
+    g.toggleInventory(); // closing gives the held item back
+    g.clickSlot(i);
+    g.clickSlot(i);
+    expect(g.slots.find((x) => x?.id === "super_sword")!.power).toBe("storm");
   });
 });

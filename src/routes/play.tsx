@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Game, type Hud, type Slot } from "@/game/engine";
-import { ITEMS, RECIPES, durabilityColor, maxDurability, usesLeft, type RecipeCategory } from "@/game/data";
+import { ITEMS, RECIPES, SWORD_POWER_NAMES, durabilityColor, maxDurability, usesLeft, type RecipeCategory } from "@/game/data";
 import { listWorlds, loadSave } from "@/game/world";
 import { SPRITE_URLS } from "@/game/sprite-assets";
 
@@ -239,6 +239,7 @@ function Play() {
                         Holding: {ITEMS[hud.held.id]?.name ?? hud.held.id} x{hud.held.n}
                         {maxDurability(hud.held.id) !== undefined &&
                           ` (${usesLeft(hud.held)}/${maxDurability(hud.held.id)} uses)`}
+                        {hud.held.power && ` - ${SWORD_POWER_NAMES[hud.held.power]}`}
                       </span>
                       <button className="btn small" onClick={() => g?.eatHeld()}>
                         Eat
@@ -344,7 +345,7 @@ function DurBar({ slot }: { slot: Slot }) {
   if (max === undefined || left === undefined) return null;
   const ratio = left / max;
   return (
-    <span className="dur" title={`${left}/${max} uses left`}>
+    <span className="dur" title={`${left}/${max} uses left${slot.power ? " - " + SWORD_POWER_NAMES[slot.power] : ""}`}>
       <span style={{ width: ratio * 100 + "%", background: durabilityColor(ratio) }} />
     </span>
   );

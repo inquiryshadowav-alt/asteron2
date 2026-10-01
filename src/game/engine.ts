@@ -13,6 +13,10 @@ import {
   TOOL_HIT_COOLDOWN,
   WRONG_TOOL_RATE,
   OLD_TOOL_USES,
+  SWORD_POWER_NAMES,
+  isSwordPower,
+  rollSwordPower,
+  type SwordPower,
   TOOLS_VERSION,
   maxDurability,
   type ObjKind,
@@ -66,6 +70,8 @@ export interface Slot {
   n: number;
   /** uses left; only tools have it (missing on a tool means brand new) */
   dur?: number;
+  /** Super Swords only: the Stormcaller move this sword casts when it hits a mob (rolled when it is made) */
+  power?: SwordPower;
 }
 export type Slots = (Slot | null)[];
 
@@ -384,16 +390,21 @@ export class Game {
   }
 
   /** rebuild a saved slot; tools from older saves (no durability yet) start out brand new */
-  private restoreSlot(s: { id: string; n: number; dur?: number }, fromVersion = TOOLS_VERSION): Slot {
+  private restoreSlot(s: { id: string; n: number; dur?: number; power?: unknown }, fromVersion = TOOLS_VERSION): Slot {
     const slot: Slot = { id: s.id, n: s.n };
     const max = maxDurability(s.id);
     const tier = ITEMS[s.id]?.tool?.tier;
     if (max !== undefined && tier) {
       let dur = typeof s.dur === "number" && s.dur > 0 ? s.dur : max;
       const old = fromVersion < TOOLS_VERSION ? OLD_TOOL_USES[fromVersion] : undefined;
-      if (old && typeof s.dur === "number") dur += max - old[tier];
+      if (old && tier === "super" && typeof s.dur === "number") {
+        // the Super Sword now wears out like a wooden sword: keep the same share of its life left
+        dur = Math.max(1, Math.round((s.dur * max) / old.super));
+      } else if (old && typeof s.dur === "number") dur += max - old[tier];
       slot.dur = Math.max(1, Math.min(dur, max));
     }
+    // every Super Sword has an ability: swords made before abilities existed get one the first time they load
+    if (s.id === "super_sword") slot.power = isSwordPower(s.power) ? s.power : rollSwordPower();
     return slot;
   }
 
@@ -495,7 +506,7 @@ export class Game {
     if (this.dead) return;
     this.invOpen = !this.invOpen;
     if (!this.invOpen && this.held) {
-      this.give(this.held.id, this.held.n, this.held.dur);
+      this.give(this.held.id, this.held.n, this.held.dur, this.held.power);
       this.held = null;
     }
     this.input.clear();
@@ -536,7 +547,7 @@ export class Game {
   }
 
   // ---------- inventory ----------
-  give(id: string, n: number, dur?: number): boolean {
+  give(id: string, n: number, dur?: number, power?: SwordPower): boolean {
     const def = ITEMS[id];
     if (!def) return false;
     let left = n;
@@ -554,6 +565,7 @@ export class Game {
         const slot: Slot = { id, n: add };
         const max = maxDurability(id);
         if (max !== undefined) slot.dur = dur ?? max; // new tools start with full durability
+        if (id === "super_sword") slot.power = power ?? rollSwordPower(); // a new Super Sword gets its ability now
         this.slots[i] = slot;
         left -= add;
       }
@@ -634,7 +646,12 @@ export class Game {
     }
     r.need.forEach((n) => this.take(n.id, n.n));
     this.give(r.result, r.count);
-    this.say(`Crafted ${ITEMS[r.result]?.name ?? r.result}`);
+    const forged = r.result === "super_sword" ? this.slots.find((s) => s?.id === "super_sword" && s.power) : undefined;
+    this.say(
+      forged?.power
+        ? `Crafted ${ITEMS[r.result]?.name ?? r.result}: ${SWORD_POWER_NAMES[forged.power]}`
+        : `Crafted ${ITEMS[r.result]?.name ?? r.result}`,
+    );
   }
 
   canCraft(recipeId: string) {
@@ -858,9 +875,14 @@ export class Game {
         this.hitCool = heldTool && !sword ? TOOL_HIT_COOLDOWN : SWORD_HIT_COOLDOWN;
         if (target) target.hp -= dmg;
         else if (bossTarget) bossTarget.hp -= dmg;
+        // a Super Sword casts its ability on the mob it hits (read before wear(), which can break it)
+        const power = sword === "super" ? sel?.power : undefined;
         if (sword) this.wear("sword");
         else if (heldTool) this.wear(heldTool.type);
-        if (target) {
+        if (target && power) this.castSwordPower(power, target);
+        if (target && !this.mobs.includes(target)) {
+          // already killed by the ability
+        } else if (target) {
           target.hurt = 0.35;
           target.flee = 1.4;
           const away = Math.atan2(target.y - this.y, target.x - this.x);
@@ -1401,7 +1423,11 @@ export class Game {
   private updateBoss(dt: number) {
     // cast effects run on their own clocks, but only ever exist while a boss does
     const b = this.boss;
-    if (!b) return;
+    if (!b) {
+      // a Super Sword's lightning, beam or shockwave still has to fade out with no boss around
+      if (this.beams.length || this.bolts.length || this.bursts.length) this.updateBossCasts(dt, 1);
+      return;
+    }
     const scale = this.difficulty === "hard" ? 1.35 : 1;
     b.bob += dt * 2.4;
     if (b.hurt > 0) b.hurt -= dt;
@@ -1622,6 +1648,58 @@ export class Game {
         m.vy = Math.sin(away) * 6;
         m.flee = 0.8;
       }
+    }
+  }
+
+  /**
+   * The player's version of harmMobs: the same attack hurts every mob in range (the boss's swarm
+   * included), but kills pay out like a normal sword kill, and the player is never hurt by it.
+   * `from` flings the survivors away.
+   */
+  private zapMobs(inRange: (m: Mob) => boolean, dmg: number, from?: { x: number; y: number }) {
+    for (const m of [...this.mobs]) {
+      if (!inRange(m)) continue;
+      m.hp -= dmg;
+      m.hurt = 0.35;
+      if (m.hp <= 0) this.killMob(m);
+      else if (from) {
+        const away = Math.atan2(m.y - from.y, m.x - from.x);
+        m.vx = Math.cos(away) * 6;
+        m.vy = Math.sin(away) * 6;
+        m.flee = 0.8;
+      }
+    }
+  }
+
+  /**
+   * A Super Sword's ability, cast on the mob it just hit: the Stormcaller's lightning strike (lands on
+   * the mob), storm blast (a shockwave around the player that hurts and pushes every mob in reach) or
+   * laser (a beam along the swing that pierces every mob in line). It never harms the player and never
+   * breaks anything the player built; it only hurts mobs.
+   */
+  private castSwordPower(power: SwordPower, target: Mob) {
+    if (power === "lightning") {
+      const lx = target.x;
+      const ly = target.y;
+      this.bolts.push({ tx: Math.floor(lx), ty: Math.floor(ly), warn: 0, strike: BOSS.lightning.life, seed: Math.random() * 100 });
+      this.zapMobs((o) => Math.hypot(o.x - lx, o.y - ly) <= BOSS.lightning.radius, BOSS.mobDmg.lightning);
+    } else if (power === "storm") {
+      this.bursts.push({ x: this.x, y: this.y, t: 0.4 });
+      this.zapMobs((o) => Math.hypot(o.x - this.x, o.y - this.y) < BOSS.storm.radius, BOSS.mobDmg.storm, { x: this.x, y: this.y });
+    } else {
+      const dx = this.dir === "left" ? -1 : this.dir === "right" ? 1 : 0;
+      const dy = this.dir === "up" ? -1 : this.dir === "down" ? 1 : 0;
+      // a mountain stops the beam, as it does the boss's
+      let len: number = BOSS.laser.length;
+      for (const { tx, ty, d } of beamTiles(this.x, this.y, dx, dy, BOSS.laser.length, BOSS.laser.halfWidth)) {
+        if (this.world.get(tx, ty).obj === "mountain") {
+          len = d;
+          break;
+        }
+      }
+      // hit: true so the beam can never damage the player who fired it
+      this.beams.push({ x: this.x, y: this.y, dx, dy, len, life: BOSS.laser.life, hit: true });
+      this.zapMobs((o) => beamHits(this.x, this.y, dx, dy, len, BOSS.laser.halfWidth, o.x, o.y), BOSS.mobDmg.laser);
     }
   }
 
