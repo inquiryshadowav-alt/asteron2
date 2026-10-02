@@ -565,7 +565,7 @@ export class Game {
     const s = which === "a" ? this.paintA : this.paintB;
     if (this.held) {
       if (!isPaintInput(this.held.id)) {
-        this.say("Only a dye, a tile or a sleeping tube fits here");
+        this.say("Only a dye, coal, a tile or a sleeping tube fits here");
         return;
       }
       const def = ITEMS[this.held.id]!;
@@ -1102,14 +1102,14 @@ export class Game {
     if (!pressed) return;
 
     // hoe: till dirt/grass
-    if (selDef?.tool?.type === "hoe" && (tile.t === "dirt" || tile.t === "grass") && !tile.obj) {
+    if (selDef?.tool?.type === "hoe" && (tile.t === "dirt" || tile.t === "grass") && !tile.obj && !tile.floor) {
       this.world.set(tx, ty, { ...tile, t: "farmland" });
       this.say("Tilled soil");
       this.wear("hoe");
       return;
     }
     // plant seeds
-    if (selDef?.seed && tile.t === "farmland" && !tile.obj) {
+    if (selDef?.seed && tile.t === "farmland" && !tile.obj && !tile.floor) {
       this.world.set(tx, ty, { ...tile, obj: "crop0", pt: this.time });
       this.take(sel!.id, 1);
       this.say("Planted seeds");
@@ -1164,9 +1164,9 @@ export class Game {
     }
   }
 
-  /** a floor tile fits on bare ground: not on water, tilled farmland, ore, anything already standing there, or another tile */
+  /** a floor tile fits on bare ground, including tilled soil with nothing growing in it: not on water, ore, anything already standing there (a crop too), or another tile */
   private canLayFloor(tile: Tile): boolean {
-    return !tile.floor && !tile.obj && !tile.ore && tile.t !== "water" && tile.t !== "farmland";
+    return !tile.floor && !tile.obj && !tile.ore && tile.t !== "water";
   }
 
   /** torches go on open ground or on a block / wall; never on water, trees, ores, crops, doors, beds or cave mouths */

@@ -98,7 +98,7 @@ describe("tiles, dyes and painting", () => {
   });
 
   it("has an inventory skin for every tile, painted tube, dye and the paint block", () => {
-    const ids = ["tile", "paint_block", ...DYES.flatMap((d) => [`${d}_dye`, `tile_${d}`, `bed_${d}`])];
+    const ids = ["tile", "paint_block", ...DYES.flatMap((d) => [...(d === "black" ? [] : [`${d}_dye`]), `tile_${d}`, `bed_${d}`])];
     for (const id of ids) {
       expect(ITEMS[id], id).toBeDefined();
       expect(ITEMS[id]!.icon, id).toBeTruthy();
@@ -132,6 +132,11 @@ describe("tiles, dyes and painting", () => {
     expect(paintResult("tile", "bed")).toBeNull();
     expect(paintResult("red_dye", "stone")).toBeNull();
     expect(paintResult("red_dye", undefined)).toBeNull();
+    // coal is the black dye
+    expect(paintResult("coal", "tile")).toBe("tile_black");
+    expect(paintResult("bed_red", "coal")).toBe("bed_black");
+    expect(paintResult("coal", "tile_black")).toBeNull();
+    expect(isPaintInput("coal")).toBe(true);
     expect(paintResult(undefined, undefined)).toBeNull();
   });
 

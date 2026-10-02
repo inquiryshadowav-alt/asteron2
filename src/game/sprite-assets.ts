@@ -1,5 +1,6 @@
 // AUTO-GENERATED: bundled sprite images (shipped inside the build).
 import a_bed from "./assets/bed.png";
+import a_bed_black from "./assets/bed_black.png";
 import a_builder from "./assets/builder.png";
 import a_coal from "./assets/coal.png";
 import a_corrupted from "./assets/corrupted.png";
@@ -62,6 +63,7 @@ import a_poppy from "./assets/poppy.png";
 import a_red_dye from "./assets/red_dye.png";
 import a_sunflower from "./assets/sunflower.png";
 import a_tile from "./assets/tile.png";
+import a_tile_black from "./assets/tile_black.png";
 import a_tile_blue from "./assets/tile_blue.png";
 import a_tile_red from "./assets/tile_red.png";
 import a_tile_white from "./assets/tile_white.png";
@@ -71,6 +73,7 @@ import a_yellow_dye from "./assets/yellow_dye.png";
 
 export const SPRITE_URLS: Record<string, string> = {
   bed: a_bed,
+  bed_black: a_bed_black,
   builder: a_builder,
   coal: a_coal,
   corrupted: a_corrupted,
@@ -132,6 +135,7 @@ export const SPRITE_URLS: Record<string, string> = {
   red_dye: a_red_dye,
   sunflower: a_sunflower,
   tile: a_tile,
+  tile_black: a_tile_black,
   tile_blue: a_tile_blue,
   tile_red: a_tile_red,
   tile_white: a_tile_white,

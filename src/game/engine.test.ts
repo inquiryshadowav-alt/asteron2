@@ -1177,10 +1177,24 @@ describe("floor tiles", () => {
     expect(g.world.walkable(6, 5)).toBe(true);
   });
 
-  it("do not go on water, tilled soil, ore, or on top of another tile or an object", () => {
+  it("go on empty tilled soil, which then can't be planted until the tile is lifted", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "farmland" });
+    holdItem(g, "tile", 4);
+    pressUse(g);
+    expect(g.world.get(6, 5).floor).toBe("plain");
+    expect(g.world.get(6, 5).t).toBe("farmland");
+    expect(g.slots[g.hotbar]!.n).toBe(3);
+    holdItem(g, "seeds", 2);
+    pressUse(g);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.slots[g.hotbar]!.n).toBe(2);
+  });
+
+  it("do not go on soil with a crop growing, water, ore, or on top of another tile or an object", () => {
     const cases: Tile[] = [
       { t: "water" },
-      { t: "farmland" },
+      { t: "farmland", obj: "crop1" },
       { t: "stone", ore: "coal" },
       { t: "grass", floor: "blue" },
       { t: "grass", obj: "tree" },
@@ -1193,6 +1207,14 @@ describe("floor tiles", () => {
       expect(g.slots[g.hotbar]!.n, JSON.stringify(tile)).toBe(4);
       expect(g.world.get(6, 5).floor).toBe(tile.floor);
     }
+  });
+
+  it("black tiles come from coal in the paint block", () => {
+    const g = makeGame();
+    g.paintOpen = true;
+    g.paintA = { id: "coal", n: 2 };
+    g.paintB = { id: "tile", n: 2 };
+    expect(g.paintOutput()).toEqual({ id: "tile_black", n: 1 });
   });
 
   it("let any block be placed on top, which keeps the tile underneath", () => {

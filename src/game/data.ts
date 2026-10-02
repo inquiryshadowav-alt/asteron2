@@ -268,14 +268,16 @@ const list: ItemDef[] = [
 
 // ---------- dyes, flowers and painting ----------
 
-export type Dye = "red" | "blue" | "white" | "yellow";
-export const DYES: readonly Dye[] = ["red", "blue", "white", "yellow"];
-export const DYE_COLOR: Record<Dye, string> = { red: "#e0463d", blue: "#3f74dd", white: "#f1f1ec", yellow: "#f2d034" };
+/** paint colours: four real dyes, plus black, which is made from coal (there is no black dye item) */
+export type Dye = "red" | "blue" | "white" | "yellow" | "black";
+export const DYES: readonly Dye[] = ["red", "blue", "white", "yellow", "black"];
+export const DYE_COLOR: Record<Dye, string> = { red: "#e0463d", blue: "#3f74dd", white: "#f1f1ec", yellow: "#f2d034", black: "#2b2b33" };
 const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 
 DYES.forEach((d) => {
+  // black has no dye item of its own: coal is the black dye
+  if (d !== "black") list.push({ id: `${d}_dye`, name: `${cap(d)} Dye`, color: DYE_COLOR[d], stack: 64, icon: `${d}_dye` });
   list.push(
-    { id: `${d}_dye`, name: `${cap(d)} Dye`, color: DYE_COLOR[d], stack: 64, icon: `${d}_dye` },
     { id: `tile_${d}`, name: `${cap(d)} Tile`, color: DYE_COLOR[d], stack: 64, icon: `tile_${d}`, floor: d },
     { id: `bed_${d}`, name: `${cap(d)} Sleeping Tube`, color: DYE_COLOR[d], stack: 1, place: "bed", icon: `bed_${d}`, bedDye: d },
   );
@@ -296,6 +298,7 @@ export const FLOOR_PALETTE: Record<string, [string, string, string]> = {
   blue: ["#3f74dd", "#2a4ea6", "#7fa6f4"],
   white: ["#f1f1ec", "#bdbdb4", "#ffffff"],
   yellow: ["#f2d034", "#b89a14", "#fbe97d"],
+  black: ["#2b2b33", "#15151a", "#4a4a55"],
 };
 
 /** the item that places (and drops) a floor tile of this colour */
@@ -310,6 +313,7 @@ export function bedItem(dye: string | undefined): string {
 
 /** the dye colour of a dye item, or undefined when the item is not a dye */
 export function dyeOf(id: string | undefined): Dye | undefined {
+  if (id === "coal") return "black"; // coal works as the black dye
   return DYES.find((d) => id === `${d}_dye`);
 }
 
