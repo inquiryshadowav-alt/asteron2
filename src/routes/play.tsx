@@ -197,19 +197,23 @@ function Play() {
             </div>
 
             <div className={"pad" + (touchControls ? "" : " compact")}>
-              <div className="dpad">
-                <PadBtn label="▲" cls="up" on={(v) => hold("up", v)} />
-                <PadBtn label="◀" cls="left" on={(v) => hold("left", v)} />
-                <PadBtn label="▶" cls="right" on={(v) => hold("right", v)} />
-                <PadBtn label="▼" cls="down" on={(v) => hold("down", v)} />
-              </div>
+              {touchControls ? (
+                <Joystick onDir={hold} />
+              ) : (
+                <div className="dpad">
+                  <PadBtn label="▲" cls="up" on={(v) => hold("up", v)} />
+                  <PadBtn label="◀" cls="left" on={(v) => hold("left", v)} />
+                  <PadBtn label="▶" cls="right" on={(v) => hold("right", v)} />
+                  <PadBtn label="▼" cls="down" on={(v) => hold("down", v)} />
+                </div>
+              )}
               <PadBtn label="A" cls="action" on={(v) => hold("use", v)} />
             </div>
 
             {showHint && (
               <div className="controls-hint">
                 {touchControls ? (
-                  <>Arrows to move · Tap A to place · Hold A to break</>
+                  <>Joystick to move · Tap A to place · Hold A to break</>
                 ) : (
                   <>Arrow keys to move · Space or click to place · Hold to break</>
                 )}
@@ -424,5 +428,90 @@ function PadBtn({
     >
       {label}
     </button>
+  );
+}
+
+type Dir = "up" | "down" | "left" | "right";
+
+/**
+ * Virtual joystick for touch phones. Drag the thumb from the centre; the offset is turned into the
+ * same held up/down/left/right flags the arrow buttons and keyboard use, so the engine is untouched.
+ * A dead zone avoids accidental movement and diagonals work by holding two directions at once.
+ */
+function Joystick({ onDir }: { onDir: (action: Dir, on: boolean) => void }) {
+  const baseRef = useRef<HTMLDivElement | null>(null);
+  const activeId = useRef<number | null>(null);
+  const dirs = useRef<Record<Dir, boolean>>({ up: false, down: false, left: false, right: false });
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+
+  const setDirs = (next: Record<Dir, boolean>) => {
+    (Object.keys(next) as Dir[]).forEach((d) => {
+      if (dirs.current[d] !== next[d]) {
+        dirs.current[d] = next[d];
+        onDir(d, next[d]);
+      }
+    });
+  };
+
+  const release = () => {
+    activeId.current = null;
+    setKnob({ x: 0, y: 0 });
+    setDirs({ up: false, down: false, left: false, right: false });
+  };
+
+  const move = (e: React.PointerEvent) => {
+    const el = baseRef.current;
+    if (!el || e.pointerId !== activeId.current) return;
+    const r = el.getBoundingClientRect();
+    const radius = r.width / 2;
+    let dx = e.clientX - (r.left + radius);
+    let dy = e.clientY - (r.top + radius);
+    const dist = Math.hypot(dx, dy);
+    const max = radius * 0.6;
+    if (dist > max) {
+      dx = (dx / dist) * max;
+      dy = (dy / dist) * max;
+    }
+    setKnob({ x: dx, y: dy });
+    const dead = radius * 0.22;
+    // a direction counts as held once its axis passes the dead zone and it is not much weaker than the other axis
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    setDirs({
+      left: dx < -dead && ax >= ay * 0.5,
+      right: dx > dead && ax >= ay * 0.5,
+      up: dy < -dead && ay >= ax * 0.5,
+      down: dy > dead && ay >= ax * 0.5,
+    });
+  };
+
+  // make sure nothing stays held if the joystick unmounts mid-drag
+  useEffect(() => () => {
+    (Object.keys(dirs.current) as Dir[]).forEach((d) => {
+      if (dirs.current[d]) onDir(d, false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div
+      ref={baseRef}
+      className="joystick"
+      role="application"
+      aria-label="Movement joystick"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        if (activeId.current !== null) return;
+        activeId.current = e.pointerId;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        move(e);
+      }}
+      onPointerMove={move}
+      onPointerUp={(e) => e.pointerId === activeId.current && release()}
+      onPointerCancel={(e) => e.pointerId === activeId.current && release()}
+      onLostPointerCapture={release}
+    >
+      <div className="joystick-knob" style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }} />
+    </div>
   );
 }

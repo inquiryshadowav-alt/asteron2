@@ -381,6 +381,27 @@
   box-shadow: 0 1px 0 #2f5c14, inset 0 2px 6px #0006;
 }
 
+/* touch-phone movement joystick (replaces the arrow buttons) */
+.joystick {
+  position: relative;
+  width: clamp(112px, 34vmin, 156px);
+  height: clamp(112px, 34vmin, 156px);
+  border-radius: 50%;
+  background: radial-gradient(circle, #12151dcc 55%, #12151d88 100%);
+  border: 2px solid var(--bc-edge);
+  box-shadow: 0 4px 14px #0007, inset 0 0 14px #0006;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.joystick-knob {
+  position: absolute; left: 50%; top: 50%;
+  width: 42%; height: 42%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #7d889f, #3a4150);
+  border: 2px solid var(--bc-edge);
+  box-shadow: 0 3px 8px #0009, inset 0 1px 0 #ffffff22;
+  pointer-events: none;
+}
+
 /* the desktop / mouse version: available for anyone without a keyboard, but out of the way of
    people who do have one — smaller, a little translucent until you touch it */
 .pad.compact {
