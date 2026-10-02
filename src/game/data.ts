@@ -25,7 +25,12 @@ export type ObjKind =
   | "crop1"
   | "crop2"
   | "crop3"
-  | "tall_grass";
+  | "tall_grass"
+  | "flower_poppy"
+  | "flower_bluebell"
+  | "flower_jasmine"
+  | "flower_sunflower"
+  | "block_paint";
 
 export interface Tile {
   t: TileType;
@@ -35,6 +40,10 @@ export interface Tile {
   pt?: number | undefined;
   /** a torch is mounted on this tile (on the ground, or on a block / wall) */
   torch?: boolean | undefined;
+  /** a floor tile (decoration) laid on the ground here: "plain" or a dye colour; blocks can still stand on top of it */
+  floor?: string | undefined;
+  /** a sleeping tube's dye colour (both halves carry it); missing means the original cyan */
+  dye?: string | undefined;
 }
 
 export const TILE_COLORS: Record<TileType, [string, string]> = {
@@ -80,6 +89,11 @@ export const OBJ_SOLID: Record<ObjKind, boolean> = {
   crop2: false,
   crop3: false,
   tall_grass: false,
+  flower_poppy: false,
+  flower_bluebell: false,
+  flower_jasmine: false,
+  flower_sunflower: false,
+  block_paint: true,
 };
 
 /** objects drawn in the "tall" pass, sorted by base Y */
@@ -105,6 +119,11 @@ export const OBJ_TALL: Record<ObjKind, boolean> = {
   crop2: false,
   crop3: false,
   tall_grass: false,
+  flower_poppy: false,
+  flower_bluebell: false,
+  flower_jasmine: false,
+  flower_sunflower: false,
+  block_paint: true,
 };
 
 /** sprite key used for an object (undefined = procedural drawing) */
@@ -119,6 +138,11 @@ export const OBJ_SPRITE: Partial<Record<ObjKind, string>> = {
   block_iron: "iron_block",
   block_diamond: "diamond_block",
   ghost_block: "ghost_block",
+  flower_poppy: "poppy",
+  flower_bluebell: "bluebell",
+  flower_jasmine: "jasmine",
+  flower_sunflower: "sunflower",
+  block_paint: "paint_block",
 };
 
 /** item dropped when a placed block is broken */
@@ -130,6 +154,7 @@ export const BLOCK_DROP: Partial<Record<ObjKind, string>> = {
   block_settings: "settings",
   block_iron: "iron_block",
   block_diamond: "diamond_block",
+  block_paint: "paint_block",
 };
 
 export type ToolType = "sword" | "pickaxe" | "axe" | "hoe";
@@ -184,6 +209,10 @@ export interface ItemDef {
   seed?: boolean;
   /** placed as a light source on a tile, not as a block */
   torch?: boolean;
+  /** placed as a floor tile on the ground, in this colour ("plain" or a dye) */
+  floor?: string;
+  /** a sleeping tube painted in this dye colour */
+  bedDye?: string;
 }
 
 const HOE_ART = new Set<Tier>(["wood", "stone", "iron", "diamond", "super"]);
@@ -232,7 +261,84 @@ const list: ItemDef[] = [
   { id: "xp", name: "XP", color: "#5cff6e", stack: 99, icon: "xp" },
   { id: "ghost_block", name: "Ghost Block", color: "#5a3f8a", stack: 4, place: "ghost_block", icon: "ghost_block" },
   { id: "shiny_metal", name: "Shiny Metal", color: "#c9a8ff", stack: 64, icon: "shiny_metal" },
+  // floor tiles: 1 wood makes 4; they go on any ground and blocks can still be placed on top of them
+  { id: "tile", name: "Tile", color: "#c99a5b", stack: 64, icon: "tile", floor: "plain" },
+  { id: "paint_block", name: "Paint Block", color: "#8a5f27", stack: 64, place: "block_paint", icon: "paint_block" },
 ];
+
+// ---------- dyes, flowers and painting ----------
+
+export type Dye = "red" | "blue" | "white" | "yellow";
+export const DYES: readonly Dye[] = ["red", "blue", "white", "yellow"];
+export const DYE_COLOR: Record<Dye, string> = { red: "#e0463d", blue: "#3f74dd", white: "#f1f1ec", yellow: "#f2d034" };
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+
+DYES.forEach((d) => {
+  list.push(
+    { id: `${d}_dye`, name: `${cap(d)} Dye`, color: DYE_COLOR[d], stack: 64, icon: `${d}_dye` },
+    { id: `tile_${d}`, name: `${cap(d)} Tile`, color: DYE_COLOR[d], stack: 64, icon: `tile_${d}`, floor: d },
+    { id: `bed_${d}`, name: `${cap(d)} Sleeping Tube`, color: DYE_COLOR[d], stack: 1, place: "bed", icon: `bed_${d}`, bedDye: d },
+  );
+});
+
+/** the dye a wild flower gives when it is picked */
+export const FLOWER_DYE: Partial<Record<ObjKind, string>> = {
+  flower_poppy: "red_dye",
+  flower_bluebell: "blue_dye",
+  flower_jasmine: "white_dye",
+  flower_sunflower: "yellow_dye",
+};
+
+/** floor colours as [base, shade, highlight]: the plain oak tile and one per dye */
+export const FLOOR_PALETTE: Record<string, [string, string, string]> = {
+  plain: ["#c99a5b", "#9a6d38", "#e3bd82"],
+  red: ["#e0463d", "#a82a24", "#f78a80"],
+  blue: ["#3f74dd", "#2a4ea6", "#7fa6f4"],
+  white: ["#f1f1ec", "#bdbdb4", "#ffffff"],
+  yellow: ["#f2d034", "#b89a14", "#fbe97d"],
+};
+
+/** the item that places (and drops) a floor tile of this colour */
+export function floorItem(floor: string | undefined): string {
+  return !floor || floor === "plain" ? "tile" : `tile_${floor}`;
+}
+
+/** the item that places (and drops) a sleeping tube of this colour */
+export function bedItem(dye: string | undefined): string {
+  return dye ? `bed_${dye}` : "bed";
+}
+
+/** the dye colour of a dye item, or undefined when the item is not a dye */
+export function dyeOf(id: string | undefined): Dye | undefined {
+  return DYES.find((d) => id === `${d}_dye`);
+}
+
+/** which kind of thing a paint block can colour: floor tiles and sleeping tubes */
+export function paintFamily(id: string | undefined): "tile" | "bed" | undefined {
+  if (!id) return undefined;
+  if (id === "tile" || id.startsWith("tile_")) return "tile";
+  if (id === "bed" || id.startsWith("bed_")) return "bed";
+  return undefined;
+}
+
+/** can this item go into a paint block at all? (a dye, a tile or a sleeping tube) */
+export function isPaintInput(id: string | undefined): boolean {
+  return !!dyeOf(id) || !!paintFamily(id);
+}
+
+/**
+ * What a paint block makes from its two input boxes: one dye plus one tile (or sleeping tube),
+ * in either order, gives that tile / tube in the dye's colour. Re-dyeing works too; dyeing
+ * something with the colour it already has makes nothing.
+ */
+export function paintResult(a: string | undefined, b: string | undefined): string | null {
+  const dye = dyeOf(a) ?? dyeOf(b);
+  const target = dyeOf(a) ? b : dyeOf(b) ? a : undefined;
+  const family = paintFamily(target);
+  if (!dye || !family) return null;
+  const result = `${family}_${dye}`;
+  return result === target ? null : result;
+}
 
 (["wood", "stone", "iron", "diamond"] as Tier[]).forEach((t) => {
   (["pickaxe", "axe", "sword", "hoe"] as ToolType[]).forEach((k) => list.push(tool(k, t)));
@@ -266,6 +372,8 @@ export const RECIPES: Recipe[] = [
   { id: "diamond_block", result: "diamond_block", count: 1, cat: "Materials", need: [{ id: "diamond", n: 9 }] },
   { id: "bed", result: "bed", count: 1, cat: "Comfort", need: [{ id: "settings", n: 2 }, { id: "iron", n: 2 }] },
   { id: "door", result: "door", count: 1, cat: "Comfort", need: [{ id: "wood", n: 4 }] },
+  { id: "tiles", result: "tile", count: 4, cat: "Comfort", need: [{ id: "wood", n: 1 }] },
+  { id: "paint_block", result: "paint_block", count: 1, cat: "Comfort", need: [{ id: "settings", n: 3 }, { id: "wood", n: 3 }] },
   { id: "torch", result: "torch", count: 4, cat: "Comfort", need: [{ id: "coal", n: 1 }, { id: "stick", n: 1 }] },
   { id: "seeds", result: "seeds", count: 2, cat: "Food", need: [{ id: "wheat", n: 1 }] },
   {

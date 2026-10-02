@@ -50,6 +50,24 @@ import a_wood_pickaxe from "./assets/wood_pickaxe.png";
 import a_wood_sword from "./assets/wood_sword.png";
 import a_xp from "./assets/xp.png";
 import a_zombie from "./assets/zombie.png";
+import a_bed_blue from "./assets/bed_blue.png";
+import a_bed_red from "./assets/bed_red.png";
+import a_bed_white from "./assets/bed_white.png";
+import a_bed_yellow from "./assets/bed_yellow.png";
+import a_bluebell from "./assets/bluebell.png";
+import a_blue_dye from "./assets/blue_dye.png";
+import a_jasmine from "./assets/jasmine.png";
+import a_paint_block from "./assets/paint_block.png";
+import a_poppy from "./assets/poppy.png";
+import a_red_dye from "./assets/red_dye.png";
+import a_sunflower from "./assets/sunflower.png";
+import a_tile from "./assets/tile.png";
+import a_tile_blue from "./assets/tile_blue.png";
+import a_tile_red from "./assets/tile_red.png";
+import a_tile_white from "./assets/tile_white.png";
+import a_tile_yellow from "./assets/tile_yellow.png";
+import a_white_dye from "./assets/white_dye.png";
+import a_yellow_dye from "./assets/yellow_dye.png";
 
 export const SPRITE_URLS: Record<string, string> = {
   bed: a_bed,
@@ -102,5 +120,23 @@ export const SPRITE_URLS: Record<string, string> = {
   wood_pickaxe: a_wood_pickaxe,
   wood_sword: a_wood_sword,
   xp: a_xp,
+  bed_blue: a_bed_blue,
+  bed_red: a_bed_red,
+  bed_white: a_bed_white,
+  bed_yellow: a_bed_yellow,
+  bluebell: a_bluebell,
+  blue_dye: a_blue_dye,
+  jasmine: a_jasmine,
+  paint_block: a_paint_block,
+  poppy: a_poppy,
+  red_dye: a_red_dye,
+  sunflower: a_sunflower,
+  tile: a_tile,
+  tile_blue: a_tile_blue,
+  tile_red: a_tile_red,
+  tile_white: a_tile_white,
+  tile_yellow: a_tile_yellow,
+  white_dye: a_white_dye,
+  yellow_dye: a_yellow_dye,
   zombie: a_zombie,
 };

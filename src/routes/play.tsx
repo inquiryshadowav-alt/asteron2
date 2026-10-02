@@ -220,18 +220,54 @@ function Play() {
               <div className="overlay">
                 <div className="pixel-panel wide">
                   <h2 className="sect">Inventory</h2>
-                  <div className="grid">
-                    {hud.slots.map((s, i) => (
-                      <button key={i} className="cell" onClick={() => g?.clickSlot(i)}>
-                        {s && (
-                          <>
-                            <ItemIcon id={s.id} />
-                            <span className="cnt">{s.n > 1 ? s.n : ""}</span>
-                            <DurBar slot={s} />
-                          </>
-                        )}
-                      </button>
-                    ))}
+                  <div className="inv-wrap">
+                    <div className="grid">
+                      {hud.slots.map((s, i) => (
+                        <button key={i} className="cell" onClick={() => g?.clickSlot(i)}>
+                          {s && (
+                            <>
+                              <ItemIcon id={s.id} />
+                              <span className="cnt">{s.n > 1 ? s.n : ""}</span>
+                              <DurBar slot={s} />
+                            </>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {hud.paint && (
+                      <div className="paint-panel" aria-label="Paint block">
+                        <span className="paint-title">Paint Block</span>
+                        <div className="paint-row">
+                          <button className="cell" aria-label="Paint box 1" onClick={() => g?.clickPaintSlot("a")}>
+                            {hud.paint.a && (
+                              <>
+                                <ItemIcon id={hud.paint.a.id} />
+                                <span className="cnt">{hud.paint.a.n > 1 ? hud.paint.a.n : ""}</span>
+                              </>
+                            )}
+                          </button>
+                          <span className="paint-sign">+</span>
+                          <button className="cell" aria-label="Paint box 2" onClick={() => g?.clickPaintSlot("b")}>
+                            {hud.paint.b && (
+                              <>
+                                <ItemIcon id={hud.paint.b.id} />
+                                <span className="cnt">{hud.paint.b.n > 1 ? hud.paint.b.n : ""}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <span className="paint-sign">=</span>
+                        <button
+                          className={"cell paint-out" + (hud.paint.out ? " ready" : "")}
+                          aria-label="Painted result"
+                          title={hud.paint.out ? (ITEMS[hud.paint.out.id]?.name ?? hud.paint.out.id) : undefined}
+                          onClick={() => g?.takePaintResult()}
+                        >
+                          {hud.paint.out && <ItemIcon id={hud.paint.out.id} />}
+                        </button>
+                        <span className="paint-hint">A dye + a tile or a sleeping tube</span>
+                      </div>
+                    )}
                   </div>
                   {hud.held && (
                     <div className="row held">

@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { ITEMS, TOOL_USES, durabilityColor, maxDurability, usesLeft, type Tier } from "./data";
+import {
+  DYES,
+  FLOWER_DYE,
+  ITEMS,
+  OBJ_SOLID,
+  OBJ_SPRITE,
+  RECIPES,
+  TOOL_USES,
+  bedItem,
+  durabilityColor,
+  floorItem,
+  isPaintInput,
+  maxDurability,
+  paintResult,
+  usesLeft,
+  type Tier,
+} from "./data";
 import { SPRITE_URLS } from "./sprite-assets";
 
 const TIERS: Tier[] = ["wood", "stone", "iron", "diamond"];
@@ -63,5 +79,72 @@ describe("torches and coal", () => {
     const r = RECIPES.find((x) => x.result === "torch")!;
     expect(r.need).toEqual([{ id: "coal", n: 1 }, { id: "stick", n: 1 }]);
     expect(r.count).toBeGreaterThan(1);
+  });
+});
+
+describe("tiles, dyes and painting", () => {
+  it("makes 4 tiles from 1 wood", () => {
+    const r = RECIPES.find((x) => x.result === "tile")!;
+    expect(r.count).toBe(4);
+    expect(r.need).toEqual([{ id: "wood", n: 1 }]);
+  });
+
+  it("builds the paint block from 3 settings blocks and 3 wood", () => {
+    const r = RECIPES.find((x) => x.result === "paint_block")!;
+    expect(r.count).toBe(1);
+    expect(r.need).toEqual([{ id: "settings", n: 3 }, { id: "wood", n: 3 }]);
+    expect(ITEMS["paint_block"]!.place).toBe("block_paint");
+    expect(OBJ_SOLID["block_paint"]).toBe(true);
+  });
+
+  it("has an inventory skin for every tile, painted tube, dye and the paint block", () => {
+    const ids = ["tile", "paint_block", ...DYES.flatMap((d) => [`${d}_dye`, `tile_${d}`, `bed_${d}`])];
+    for (const id of ids) {
+      expect(ITEMS[id], id).toBeDefined();
+      expect(ITEMS[id]!.icon, id).toBeTruthy();
+      expect(SPRITE_URLS[ITEMS[id]!.icon!], id).toBeTruthy();
+    }
+  });
+
+  it("gives every flower a world skin and one of the four dyes", () => {
+    const flowers = Object.keys(FLOWER_DYE);
+    expect(flowers).toHaveLength(4);
+    expect(new Set(Object.values(FLOWER_DYE)).size).toBe(4);
+    for (const f of flowers) {
+      expect(SPRITE_URLS[OBJ_SPRITE[f as keyof typeof OBJ_SPRITE]!], f).toBeTruthy();
+      expect(OBJ_SOLID[f as keyof typeof OBJ_SOLID], f).toBe(false);
+      expect(ITEMS[FLOWER_DYE[f as keyof typeof FLOWER_DYE]!], f).toBeDefined();
+    }
+    expect(FLOWER_DYE["flower_poppy"]).toBe("red_dye");
+  });
+
+  it("paints a tile or a sleeping tube with one dye, in either order", () => {
+    expect(paintResult("red_dye", "tile")).toBe("tile_red");
+    expect(paintResult("tile", "red_dye")).toBe("tile_red");
+    expect(paintResult("blue_dye", "bed")).toBe("bed_blue");
+    expect(paintResult("bed", "yellow_dye")).toBe("bed_yellow");
+    expect(paintResult("white_dye", "tile_red")).toBe("tile_white"); // re-dyeing works
+  });
+
+  it("makes nothing unless it is exactly one dye plus one paintable thing", () => {
+    expect(paintResult("red_dye", "tile_red")).toBeNull(); // already that colour
+    expect(paintResult("red_dye", "blue_dye")).toBeNull();
+    expect(paintResult("tile", "bed")).toBeNull();
+    expect(paintResult("red_dye", "stone")).toBeNull();
+    expect(paintResult("red_dye", undefined)).toBeNull();
+    expect(paintResult(undefined, undefined)).toBeNull();
+  });
+
+  it("only lets dyes, tiles and sleeping tubes into the paint boxes", () => {
+    for (const id of ["red_dye", "tile", "tile_blue", "bed", "bed_white"]) expect(isPaintInput(id), id).toBe(true);
+    for (const id of ["stone", "wood", "paint_block", "iron_pickaxe"]) expect(isPaintInput(id), id).toBe(false);
+  });
+
+  it("maps a colour back to the item that places it", () => {
+    expect(floorItem(undefined)).toBe("tile");
+    expect(floorItem("plain")).toBe("tile");
+    expect(floorItem("red")).toBe("tile_red");
+    expect(bedItem(undefined)).toBe("bed");
+    expect(bedItem("blue")).toBe("bed_blue");
   });
 });

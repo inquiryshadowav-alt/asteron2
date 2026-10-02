@@ -1,6 +1,6 @@
 // Sprite rendering: CDN bot/item art plus procedural pixel terrain fallbacks.
 import type { ObjKind, TileType } from "./data";
-import { OBJ_SPRITE, TILE_COLORS } from "./data";
+import { FLOOR_PALETTE, OBJ_SPRITE, TILE_COLORS } from "./data";
 import { SPRITE_URLS } from "./sprite-assets";
 
 export type Ctx = CanvasRenderingContext2D;
@@ -86,7 +86,29 @@ function blit(
   else c.drawImage(img, x, baseY - h, w, h);
 }
 
-export function drawGround(c: Ctx, t: TileType, ore: string | undefined, x: number, y: number, S: number, wx: number, wy: number) {
+/** a floor tile laid on the ground: a bevelled square split into four small tiles by a grout cross */
+function drawFloor(c: Ctx, floor: string, x: number, y: number, S: number) {
+  const [base, shade, light] = FLOOR_PALETTE[floor] ?? FLOOR_PALETTE["plain"]!;
+  const e = Math.max(1, Math.round(S / 16));
+  px(c, x, y, S, S, shade);
+  px(c, x + e, y + e, S - 2 * e, S - 2 * e, base);
+  px(c, x + e, y + e, S - 2 * e, e, light);
+  px(c, x + e, y + e, e, S - 2 * e, light);
+  px(c, x + S / 2 - e / 2, y + e, e, S - 2 * e, shade);
+  px(c, x + e, y + S / 2 - e / 2, S - 2 * e, e, shade);
+}
+
+export function drawGround(
+  c: Ctx,
+  t: TileType,
+  ore: string | undefined,
+  x: number,
+  y: number,
+  S: number,
+  wx: number,
+  wy: number,
+  floor?: string,
+) {
   const pair = TILE_COLORS[t];
   px(c, x, y, S, S, pair[0]);
   const q = S / 4;
@@ -99,6 +121,7 @@ export function drawGround(c: Ctx, t: TileType, ore: string | undefined, x: numb
     px(c, x, y + q, S, q / 2, "#7d5730");
     px(c, x, y + 3 * q, S, q / 2, "#7d5730");
   }
+  if (floor) drawFloor(c, floor, x, y, S);
   if (ore) drawOre(c, ore, x, y, S);
 }
 
@@ -200,10 +223,18 @@ function drawOre(c: Ctx, ore: string, x: number, y: number, S: number) {
 }
 
 /** Tall objects are drawn from their base (bottom of tile). */
-export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: number) {
-  const key = OBJ_SPRITE[kind];
+export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: number, dye?: string) {
+  // a painted sleeping tube has its own sprite per dye colour
+  const key = kind === "bed" && dye ? `bed_${dye}` : OBJ_SPRITE[kind];
   const img = sprite(key);
+  // the tube's sprite already covers both of its tiles: its second half draws nothing of its own
+  if (kind === "bed2" && sprite(dye ? `bed_${dye}` : "bed")) return;
   if (img && key) {
+    if (kind.startsWith("flower_")) {
+      // wild flowers stand a little smaller than a block, centred on their tile
+      blit(c, key, img, x + S * 0.1, baseY - S * 0.06, S, 0.8, false);
+      return;
+    }
     if (kind === "bed") {
       c.save();
       c.globalAlpha = 0.25;
@@ -289,6 +320,16 @@ export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: n
       }
       break;
     }
+    case "flower_poppy":
+    case "flower_bluebell":
+    case "flower_jasmine":
+    case "flower_sunflower": {
+      // plain stand-in until the flower art has loaded: a green stem with a coloured head
+      const head = { flower_poppy: "#e0463d", flower_bluebell: "#5a7be8", flower_jasmine: "#f6f6f0", flower_sunflower: "#f2d034" }[kind];
+      px(c, x + 3.6 * u, baseY - S * 0.55, u * 0.8, S * 0.5, "#3f8a24");
+      px(c, x + 2.6 * u, baseY - S * 0.78, 2.8 * u, 2.8 * u, head);
+      break;
+    }
     case "crop0":
     case "crop1":
     case "crop2":
@@ -310,6 +351,7 @@ export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: n
         block_settings: ["#5a5f66", "#3d4147"],
         block_iron: ["#e6e6e6", "#bdbdbd"],
         block_diamond: ["#7fe9e2", "#41b9b3"],
+        block_paint: ["#8a5f27", "#6d4a1d"],
       };
       const cols = map[kind] ?? ["#999", "#777"];
       px(c, x, baseY - S * 1.1, S, S * 1.1, cols[0]);

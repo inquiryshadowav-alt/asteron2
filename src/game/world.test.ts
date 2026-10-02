@@ -228,3 +228,72 @@ describe("tall grass", () => {
     expect(w.walkable(4, 4)).toBe(true);
   });
 });
+
+describe("wild flowers", () => {
+  const SIZE = 100;
+  function scanFlowers(seed: number) {
+    const w = new World(seed);
+    const groups = new Map<string, { kinds: Set<string>; xs: number[]; ys: number[] }>();
+    let grass = 0;
+    let flowers = 0;
+    for (let y = -SIZE; y < SIZE; y++) {
+      for (let x = -SIZE; x < SIZE; x++) {
+        const t = w.get(x, y);
+        if (t.t === "grass") grass++;
+        if (!t.obj?.startsWith("flower_")) continue;
+        flowers++;
+        expect(t.t, `flower on ${t.t} at ${x},${y} (seed ${seed})`).toBe("grass");
+        const k = Math.floor(x / 10) + "," + Math.floor(y / 10);
+        const g = groups.get(k) ?? { kinds: new Set<string>(), xs: [], ys: [] };
+        g.kinds.add(t.obj);
+        g.xs.push(x);
+        g.ys.push(y);
+        groups.set(k, g);
+      }
+    }
+    return { groups, grass, flowers };
+  }
+
+  it("grow in groups of 5 to 7 of one kind, close together", () => {
+    let total = 0;
+    for (const seed of SEEDS) {
+      for (const [k, g] of scanFlowers(seed).groups) {
+        expect(g.xs.length, `group ${k} (seed ${seed})`).toBeGreaterThanOrEqual(5);
+        expect(g.xs.length, `group ${k} (seed ${seed})`).toBeLessThanOrEqual(7);
+        expect(g.kinds.size, `group ${k} (seed ${seed})`).toBe(1);
+        expect(Math.max(...g.xs) - Math.min(...g.xs)).toBeLessThanOrEqual(4);
+        expect(Math.max(...g.ys) - Math.min(...g.ys)).toBeLessThanOrEqual(4);
+        total++;
+      }
+    }
+    expect(total).toBeGreaterThan(100);
+  });
+
+  it("are neither rare nor common, and all four kinds turn up", () => {
+    let grass = 0;
+    let flowers = 0;
+    const kinds = new Set<string>();
+    for (const seed of SEEDS) {
+      const r = scanFlowers(seed);
+      grass += r.grass;
+      flowers += r.flowers;
+      for (const g of r.groups.values()) g.kinds.forEach((k) => kinds.add(k));
+    }
+    expect(flowers / grass).toBeGreaterThan(0.01);
+    expect(flowers / grass).toBeLessThan(0.1);
+    expect(kinds.size).toBe(4);
+  });
+
+  it("are the same every time a world is generated, and never underground", () => {
+    expect(scanFlowers(42).flowers).toBe(scanFlowers(42).flowers);
+    const under = new World(42, {}, "under");
+    for (let y = -40; y < 40; y++) for (let x = -40; x < 40; x++) expect(under.get(x, y).obj?.startsWith("flower_") ?? false).toBe(false);
+  });
+
+  it("can be walked through, and picking one leaves the ground behind", () => {
+    const w = new World(1, { "4,4": { t: "grass", obj: "flower_poppy" } }, "surface");
+    expect(w.walkable(4, 4)).toBe(true);
+    w.set(4, 4, { t: "grass", obj: undefined });
+    expect(w.get(4, 4).obj).toBeUndefined();
+  });
+});

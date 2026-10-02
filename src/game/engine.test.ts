@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { DAY_LEN, Game, MORNING, TORCH_RADIUS, darknessAt } from "./engine";
-import { TOOLS_VERSION } from "./data";
+import { TOOLS_VERSION, type Tile } from "./data";
 import { World, type WorldSave } from "./world";
 
 // The engine only touches the canvas through getContext, so a stub is enough for logic tests.
@@ -1131,5 +1131,253 @@ describe("bed respawn", () => {
     expect(g.x).toBe(priv(g).originX + 0.5);
     expect(store.has("mc2d.spawn.test")).toBe(false);
     vi.unstubAllGlobals();
+  });
+});
+
+// ---------- tiles, flowers, dyes and the paint block ----------
+
+function pressUse(g: Game) {
+  priv(g).input.pressedUse = true;
+  priv(g).useLogic(0.016);
+}
+
+/** hold the use key for a while (in 0.1s frames), starting with the press itself */
+function holdKey(g: Game, seconds: number) {
+  priv(g).input.pressedUse = true;
+  priv(g).input.held["use"] = true;
+  for (let t = 0; t < seconds - 1e-9; t += 0.1) priv(g).useLogic(0.1);
+  priv(g).input.held["use"] = false;
+}
+
+function holdItem(g: Game, id: string, n = 1) {
+  g.slots[g.hotbar] = { id, n };
+}
+
+describe("floor tiles", () => {
+  it("are crafted 4 at a time from 1 wood", () => {
+    const g = makeGame();
+    g.slots.fill(null); // a new world starts with some wood in the bag
+    g.give("wood", 1);
+    g.craft("tiles");
+    expect(g.countPublic("tile")).toBe(4);
+    expect(g.countPublic("wood")).toBe(0);
+  });
+
+  it("go on grass, dirt, sand and stone ground, and walking over them is still free", () => {
+    for (const t of ["grass", "dirt", "sand", "stone"] as const) {
+      const g = makeGame();
+      g.world.set(6, 5, { t });
+      holdItem(g, "tile", 4);
+      pressUse(g);
+      expect(g.world.get(6, 5).floor, t).toBe("plain");
+      expect(g.slots[g.hotbar]!.n, t).toBe(3);
+    }
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", floor: "red" });
+    expect(g.world.walkable(6, 5)).toBe(true);
+  });
+
+  it("do not go on water, tilled soil, ore, or on top of another tile or an object", () => {
+    const cases: Tile[] = [
+      { t: "water" },
+      { t: "farmland" },
+      { t: "stone", ore: "coal" },
+      { t: "grass", floor: "blue" },
+      { t: "grass", obj: "tree" },
+    ];
+    for (const tile of cases) {
+      const g = makeGame();
+      g.world.set(6, 5, tile);
+      holdItem(g, "tile", 4);
+      pressUse(g);
+      expect(g.slots[g.hotbar]!.n, JSON.stringify(tile)).toBe(4);
+      expect(g.world.get(6, 5).floor).toBe(tile.floor);
+    }
+  });
+
+  it("let any block be placed on top, which keeps the tile underneath", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", floor: "yellow" });
+    holdItem(g, "dirt", 3);
+    holdKey(g, 0.6); // a held key must place the block, not lift the tile back off
+    const t = g.world.get(6, 5);
+    expect(t.obj).toBe("block_dirt");
+    expect(t.floor).toBe("yellow");
+  });
+
+  it("lift off with bare hands and come back as the same colour", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", floor: "red" });
+    g.slots[g.hotbar] = null;
+    holdKey(g, 0.5);
+    expect(g.world.get(6, 5).floor).toBeUndefined();
+    expect(g.countPublic("tile_red")).toBe(1);
+  });
+
+  it("are remembered in the world's saved changes", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass" });
+    holdItem(g, "tile_blue", 1);
+    pressUse(g);
+    expect(g.world.changes["6,5"]!.floor).toBe("blue");
+  });
+
+  it("do not block a bed or a torch being placed on them", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", floor: "white" });
+    g.world.set(7, 5, { t: "grass", floor: "white" });
+    holdItem(g, "bed", 1);
+    pressUse(g);
+    expect(g.world.get(6, 5).obj).toBe("bed");
+    expect(g.world.get(6, 5).floor).toBe("white");
+  });
+});
+
+describe("wild flowers", () => {
+  it("give their own dye when picked, and leave the grass", () => {
+    const pairs = [
+      ["flower_poppy", "red_dye"],
+      ["flower_bluebell", "blue_dye"],
+      ["flower_jasmine", "white_dye"],
+      ["flower_sunflower", "yellow_dye"],
+    ] as const;
+    for (const [flower, dye] of pairs) {
+      const g = makeGame();
+      g.world.set(6, 5, { t: "grass", obj: flower });
+      g.slots[g.hotbar] = null;
+      holdKey(g, 0.2);
+      expect(g.world.get(6, 5).obj, flower).toBeUndefined();
+      expect(g.countPublic(dye), flower).toBe(1);
+    }
+  });
+
+  it("do not slow the Stormcaller's laser down", () => {
+    const g = makeGame();
+    expect(priv(g).smashTile.length).toBe(2);
+    g.world.set(6, 5, { t: "grass", obj: "flower_poppy" });
+    expect(priv(g).smashTile(6, 5)).toBe(false);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    g.world.set(6, 5, { t: "grass", obj: "tree" });
+    expect(priv(g).smashTile(6, 5)).toBe(true);
+  });
+});
+
+describe("paint block", () => {
+  it("is crafted from 3 settings blocks and 3 wood", () => {
+    const g = makeGame();
+    g.slots.fill(null);
+    g.give("settings", 3);
+    g.give("wood", 3);
+    g.craft("paint_block");
+    expect(g.countPublic("paint_block")).toBe(1);
+    expect(g.countPublic("settings")).toBe(0);
+    expect(g.countPublic("wood")).toBe(0);
+  });
+
+  function placeAndOpen() {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass" });
+    holdItem(g, "paint_block", 1);
+    pressUse(g);
+    expect(g.world.get(6, 5).obj).toBe("block_paint");
+    // a single quick click on it
+    priv(g).input.pressedUse = true;
+    priv(g).input.held["use"] = true;
+    priv(g).useLogic(0.03);
+    priv(g).input.held["use"] = false;
+    priv(g).useLogic(0.03);
+    return g;
+  }
+
+  it("opens the inventory with the paint boxes after one click", () => {
+    const g = placeAndOpen();
+    expect(g.invOpen).toBe(true);
+    expect(g.paintOpen).toBe(true);
+  });
+
+  it("is still broken by holding, and then does not open", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", obj: "block_paint" });
+    g.slots[g.hotbar] = null;
+    holdKey(g, 1.2);
+    expect(g.world.get(6, 5).obj).toBeUndefined();
+    expect(g.countPublic("paint_block")).toBe(1);
+    expect(g.paintOpen).toBe(false);
+    expect(g.invOpen).toBe(false);
+  });
+
+  it("turns a dye and a tile into a tile of that colour, one at a time", () => {
+    const g = placeAndOpen();
+    g.held = { id: "red_dye", n: 2 };
+    g.clickPaintSlot("a");
+    g.held = { id: "tile", n: 3 };
+    g.clickPaintSlot("b");
+    expect(g.paintOutput()).toEqual({ id: "tile_red", n: 1 });
+    g.takePaintResult();
+    expect(g.held).toEqual({ id: "tile_red", n: 1 });
+    g.takePaintResult(); // a second one stacks on the cursor
+    expect(g.held).toEqual({ id: "tile_red", n: 2 });
+    expect(g.paintA).toBeNull(); // both dyes used up
+    expect(g.paintOutput()).toBeNull();
+    expect(g.paintB).toEqual({ id: "tile", n: 1 });
+  });
+
+  it("also paints a sleeping tube, and the painted tube places and breaks with its colour", () => {
+    const g = placeAndOpen();
+    g.held = { id: "blue_dye", n: 1 };
+    g.clickPaintSlot("b");
+    g.held = { id: "bed", n: 1 };
+    g.clickPaintSlot("a");
+    expect(g.paintOutput()).toEqual({ id: "bed_blue", n: 1 });
+    g.takePaintResult();
+    expect(g.held!.id).toBe("bed_blue");
+    g.toggleInventory(); // closing hands the cursor back to the bag
+    expect(g.countPublic("bed_blue")).toBe(1);
+
+    g.world.set(8, 5, { t: "grass" });
+    g.world.set(9, 5, { t: "grass" });
+    g.x = 7.5;
+    g.y = 5.5;
+    g.slots[g.hotbar] = { id: "bed_blue", n: 1 };
+    pressUse(g);
+    expect(g.world.get(8, 5)).toMatchObject({ obj: "bed", dye: "blue" });
+    expect(g.world.get(9, 5)).toMatchObject({ obj: "bed2", dye: "blue" });
+    g.slots[g.hotbar] = null;
+    holdKey(g, 1);
+    expect(g.world.get(8, 5).obj).toBeUndefined();
+    expect(g.world.get(8, 5).dye).toBeUndefined();
+    expect(g.world.get(9, 5).dye).toBeUndefined();
+    expect(g.countPublic("bed_blue")).toBe(1); // the one made earlier was placed, so this is the one picked back up
+  });
+
+  it("refuses anything that is not a dye, a tile or a tube", () => {
+    const g = placeAndOpen();
+    g.held = { id: "stone", n: 5 };
+    g.clickPaintSlot("a");
+    expect(g.paintA).toBeNull();
+    expect(g.held).toEqual({ id: "stone", n: 5 });
+  });
+
+  it("hands the boxes' contents back to the bag when the inventory closes", () => {
+    const g = placeAndOpen();
+    g.held = { id: "white_dye", n: 4 };
+    g.clickPaintSlot("a");
+    g.held = { id: "tile", n: 2 };
+    g.clickPaintSlot("b");
+    g.toggleInventory();
+    expect(g.paintOpen).toBe(false);
+    expect(g.paintA).toBeNull();
+    expect(g.paintB).toBeNull();
+    expect(g.countPublic("white_dye")).toBe(4);
+    expect(g.countPublic("tile")).toBe(2);
+  });
+
+  it("is not available from the plain bag", () => {
+    const g = makeGame();
+    g.toggleInventory();
+    expect(g.paintOpen).toBe(false);
+    g.held = { id: "red_dye", n: 1 };
+    g.clickPaintSlot("a");
+    expect(g.paintA).toBeNull();
   });
 });

@@ -417,6 +417,18 @@
 
 .overlay { position: absolute; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; padding: 12px; }
 .grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+/* the inventory grid, with the paint block's two input boxes and result box at its side while one is open */
+.inv-wrap { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.inv-wrap .grid { flex: 1 1 300px; }
+.paint-panel {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; flex: none;
+  background: #1c212a; border: 3px solid var(--bc-edge); color: var(--bc-text); font-size: 11px;
+}
+.paint-title { font-size: 11px; letter-spacing: 0.04em; }
+.paint-row { display: flex; align-items: center; gap: 6px; }
+.paint-sign { color: var(--bc-muted); font-size: 14px; line-height: 1; }
+.paint-out.ready { border-color: #6fcf3c; }
+.paint-hint { color: var(--bc-muted); font-size: 9px; max-width: 110px; text-align: center; }
 .recipes { display: flex; flex-direction: column; gap: 6px; max-height: 34vh; overflow: auto; }
 .recipe {
   display: flex; align-items: center; gap: 10px; padding: 6px 8px; font-size: 12px;

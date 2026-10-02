@@ -85,6 +85,15 @@ const CAVE_DIAMOND_CUTOFF = 0.994;
  */
 const CAVE_DEEP_POCKET_CUTOFF = 0.5;
 
+/**
+ * Wild flowers grow in small groups on grass. The surface is cut into FLOWER_CELL-sized squares and
+ * a bit under half of them hold one group: 5 to 7 flowers of a single kind packed close together,
+ * all on grass. Common enough to stumble on, not so common that meadows are carpeted.
+ */
+const FLOWER_CELL = 10;
+const FLOWER_GROUP_ODDS = 0.42;
+export const FLOWER_KINDS: readonly ObjKind[] = ["flower_poppy", "flower_bluebell", "flower_jasmine", "flower_sunflower"];
+
 interface Anchor {
   x: number;
   y: number;
@@ -96,6 +105,7 @@ export class World {
   changes: ChangeMap;
   private cache = new Map<string, Tile[]>();
   private anchors = new Map<string, Anchor | null>();
+  private flowerCells = new Map<string, Map<string, ObjKind>>();
   /** "x,y" of every tile carrying a torch, kept in sync so lighting never scans the whole map */
   readonly torches = new Set<string>();
 
@@ -196,21 +206,63 @@ export class World {
   }
 
 
+  /** the natural ground of a surface tile, plus the height value that decided it */
+  private groundAt(wx: number, wy: number): { t: TileType; e: number } {
+    const e = fbm(wx / 24, wy / 24, this.seed);
+    const m = fbm(wx / 11 + 100, wy / 11 + 100, this.seed + 5001);
+    let t: TileType;
+    if (e < 0.3) t = "water";
+    else if (e < 0.36) t = "sand";
+    else if (e > 0.66) t = "stone";
+    else t = m > 0.62 ? "dirt" : "grass";
+    return { t, e };
+  }
+
+  /** the flower group of one FLOWER_CELL square: "x,y" -> flower kind (empty when the square has none) */
+  private flowerCell(cx: number, cy: number): Map<string, ObjKind> {
+    const k = key(cx, cy);
+    const hit = this.flowerCells.get(k);
+    if (hit) return hit;
+    const group = new Map<string, ObjKind>();
+    if (hash2(cx, cy, this.seed + 8101) > 1 - FLOWER_GROUP_ODDS) {
+      // the centre keeps 3 tiles clear of the square's edge, so a group (radius 2) never spills into a neighbour
+      const ox = cx * FLOWER_CELL + 3 + Math.floor(hash2(cx, cy, this.seed + 8102) * (FLOWER_CELL - 6));
+      const oy = cy * FLOWER_CELL + 3 + Math.floor(hash2(cx, cy, this.seed + 8103) * (FLOWER_CELL - 6));
+      const kind = FLOWER_KINDS[Math.floor(hash2(cx, cy, this.seed + 8104) * FLOWER_KINDS.length)]!;
+      const want = 5 + Math.floor(hash2(cx, cy, this.seed + 8105) * 3); // 5, 6 or 7
+      const spots: { x: number; y: number; r: number }[] = [];
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) spots.push({ x: ox + dx, y: oy + dy, r: hash2(ox + dx, oy + dy, this.seed + 8106) });
+      }
+      spots.sort((a, b) => a.r - b.r);
+      for (const sp of spots) {
+        if (group.size >= want) break;
+        if (this.groundAt(sp.x, sp.y).t !== "grass") continue; // only on grass, never in water or on sand
+        if (hash2(sp.x, sp.y, this.seed + 99) > 0.94) continue; // a tree stands here
+        if (this.anchorAt(sp.x, sp.y)) continue; // the cave entrance stays clear
+        group.set(key(sp.x, sp.y), kind);
+      }
+      if (group.size < 5) group.clear(); // too little grass around: no group here at all
+    }
+    this.flowerCells.set(k, group);
+    return group;
+  }
+
+  /** the flower growing naturally on a surface tile, if any */
+  private flowerAt(wx: number, wy: number): ObjKind | undefined {
+    return this.flowerCell(Math.floor(wx / FLOWER_CELL), Math.floor(wy / FLOWER_CELL)).get(key(wx, wy));
+  }
+
   private genChunk(cx: number, cy: number): Tile[] {
     const tiles: Tile[] = new Array(CHUNK * CHUNK);
     for (let ty = 0; ty < CHUNK; ty++) {
       for (let tx = 0; tx < CHUNK; tx++) {
         const wx = cx * CHUNK + tx;
         const wy = cy * CHUNK + ty;
-        const e = fbm(wx / 24, wy / 24, this.seed);
-        const m = fbm(wx / 11 + 100, wy / 11 + 100, this.seed + 5001);
-        let t: TileType = "grass";
+        const ground = this.groundAt(wx, wy);
+        const e = ground.e;
+        let t: TileType = ground.t;
         let obj: ObjKind | undefined;
-
-        if (e < 0.3) t = "water";
-        else if (e < 0.36) t = "sand";
-        else if (e > 0.66) t = "stone";
-        else t = m > 0.62 ? "dirt" : "grass";
 
         // iron and diamond only exist underground (see genUnderChunk); surface stone can hold coal
         let ore: Ore | undefined;
@@ -219,6 +271,7 @@ export class World {
           else if (hash2(wx, wy, this.seed + 555) > SURFACE_COAL_CUTOFF) ore = "coal";
         } else if (t === "grass") {
           if (hash2(wx, wy, this.seed + 99) > 0.94) obj = "tree";
+          else obj = this.flowerAt(wx, wy);
         } else if (t === "dirt") {
           // tufts of tall grass grow only on dirt; breaking one gives seeds
           if (hash2(wx, wy, this.seed + 177) > GRASS_CUTOFF) obj = "tall_grass";

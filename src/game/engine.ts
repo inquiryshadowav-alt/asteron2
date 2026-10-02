@@ -2,6 +2,7 @@
 import {
   ITEMS,
   BLOCK_DROP,
+  FLOWER_DYE,
   MINE_REQ,
   OBJ_TALL,
   RECIPES,
@@ -19,6 +20,10 @@ import {
   type SwordPower,
   TOOLS_VERSION,
   maxDurability,
+  bedItem,
+  floorItem,
+  isPaintInput,
+  paintResult,
   type ObjKind,
   type Tier,
   type Tile,
@@ -96,6 +101,8 @@ export interface Hud {
   xp: number;
   /** the Stormcaller's health while it is fighting, otherwise null */
   boss: { hp: number; max: number } | null;
+  /** the paint block's side panel (two input boxes and the result) while one is open, otherwise null */
+  paint: { a: Slot | null; b: Slot | null; out: Slot | null } | null;
 }
 
 type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper" | "zombie" | "swarmling";
@@ -253,6 +260,9 @@ export function darknessAt(tod: number): number {
 }
 
 /** how far (in tiles) a torch lights up its surroundings, and keeps monsters from spawning */
+/** a click on a paint block counts as a tap (opens it) when the key comes back up within this many seconds */
+const PAINT_TAP_SECONDS = 0.35;
+
 export const TORCH_RADIUS = 5;
 const SPEED = 4.4;
 const MAX_HP = 100;
@@ -313,6 +323,12 @@ export class Game {
   private lightCv: HTMLCanvasElement | null = null;
 
   invOpen = false;
+  /** the paint block's two input boxes are showing next to the inventory */
+  paintOpen = false;
+  paintA: Slot | null = null;
+  paintB: Slot | null = null;
+  /** a click on a paint block that has not been released yet: a short click opens it, holding breaks it */
+  private paintTap: { tx: number; ty: number; t: number } | null = null;
   paused = false;
   dead = false;
   sleeping = 0;
@@ -513,8 +529,86 @@ export class Game {
       this.give(this.held.id, this.held.n, this.held.dur, this.held.power);
       this.held = null;
     }
+    if (!this.invOpen) this.closePaint();
     this.input.clear();
     this.emit();
+  }
+
+  /** a short click on a placed paint block: the inventory opens with the paint panel at its side */
+  private openPaint() {
+    this.invOpen = true;
+    this.paintOpen = true;
+    this.mining = 0;
+    this.miningKey = "";
+    this.input.clear();
+    this.emit();
+  }
+
+  /** whatever was left in the paint boxes goes back into the bag */
+  private closePaint() {
+    if (!this.paintOpen) return;
+    this.paintOpen = false;
+    for (const s of [this.paintA, this.paintB]) if (s) this.give(s.id, s.n, s.dur, s.power);
+    this.paintA = null;
+    this.paintB = null;
+  }
+
+  /** what the paint block would make right now: one dye + one tile / sleeping tube = that item in the dye's colour */
+  paintOutput(): Slot | null {
+    const id = paintResult(this.paintA?.id, this.paintB?.id);
+    return id ? { id, n: 1 } : null;
+  }
+
+  /** click one of the two paint input boxes: swaps with what the cursor is holding, like a bag slot */
+  clickPaintSlot(which: "a" | "b") {
+    if (!this.paintOpen) return;
+    const s = which === "a" ? this.paintA : this.paintB;
+    if (this.held) {
+      if (!isPaintInput(this.held.id)) {
+        this.say("Only a dye, a tile or a sleeping tube fits here");
+        return;
+      }
+      const def = ITEMS[this.held.id]!;
+      if (s && s.id === this.held.id && s.n < def.stack) {
+        const add = Math.min(def.stack - s.n, this.held.n);
+        s.n += add;
+        this.held.n -= add;
+        if (this.held.n <= 0) this.held = null;
+      } else {
+        if (which === "a") this.paintA = this.held;
+        else this.paintB = this.held;
+        this.held = s;
+      }
+    } else if (s) {
+      if (which === "a") this.paintA = null;
+      else this.paintB = null;
+      this.held = s;
+    }
+    this.emit();
+  }
+
+  /** take the painted result: uses up one dye and one tile / tube, and the item lands in the cursor */
+  takePaintResult() {
+    if (!this.paintOpen) return;
+    const out = this.paintOutput();
+    if (!out) return;
+    const def = ITEMS[out.id]!;
+    if (this.held && (this.held.id !== out.id || this.held.n >= def.stack)) {
+      this.say("Put down what you are holding first");
+      return;
+    }
+    if (this.held) this.held.n += 1;
+    else this.held = { id: out.id, n: 1 };
+    for (const which of ["a", "b"] as const) {
+      const s = which === "a" ? this.paintA : this.paintB;
+      if (!s) continue;
+      s.n -= 1;
+      if (s.n <= 0) {
+        if (which === "a") this.paintA = null;
+        else this.paintB = null;
+      }
+    }
+    this.say(`Made ${def.name}`);
   }
 
   setHotbar(i: number) {
@@ -547,6 +641,7 @@ export class Game {
       pos: this.coords(),
       xp: this.countOf("xp"),
       boss: this.boss ? { hp: this.boss.hp, max: this.boss.max } : null,
+      paint: this.paintOpen ? { a: this.paintA ? { ...this.paintA } : null, b: this.paintB ? { ...this.paintB } : null, out: this.paintOutput() } : null,
     });
   }
 
@@ -919,6 +1014,22 @@ export class Game {
       }
     }
 
+    // paint block: a short click opens it (inventory + the two input boxes and a result box); holding
+    // on it still breaks it like any other block, so the tap is only judged when the key comes back up
+    if (pressed && tile.obj === "block_paint") this.paintTap = { tx, ty, t: 0 };
+    if (this.paintTap) {
+      const tap = this.paintTap;
+      const same = tap.tx === tx && tap.ty === ty && tile.obj === "block_paint";
+      if (holding && same) tap.t += dt;
+      else {
+        this.paintTap = null;
+        if (!holding && same && tap.t < PAINT_TAP_SECONDS) {
+          this.openPaint();
+          return;
+        }
+      }
+    }
+
     // open / close a door
     if (pressed && (tile.obj === "door_closed" || tile.obj === "door_open")) {
       const open = tile.obj === "door_closed";
@@ -1015,6 +1126,14 @@ export class Game {
       } else this.say("Not ripe yet");
       return;
     }
+    // floor tiles: lay one on any open ground; blocks, beds and torches can still go on top of it
+    if (selDef?.floor) {
+      if (this.canLayFloor(tile)) {
+        this.world.set(tx, ty, { ...tile, floor: selDef.floor });
+        this.take(sel!.id, 1);
+      }
+      return;
+    }
     // place the 2-tile sleeping tube
     if (pressed && selDef?.place === "bed" && !tile.obj && tile.t !== "water") {
       const nxt = this.world.get(tx + 1, ty);
@@ -1022,8 +1141,8 @@ export class Game {
         this.say("Needs 2 free tiles");
         return;
       }
-      this.world.set(tx, ty, { ...tile, obj: "bed" });
-      this.world.set(tx + 1, ty, { ...nxt, obj: "bed2" });
+      this.world.set(tx, ty, { ...tile, obj: "bed", dye: selDef.bedDye });
+      this.world.set(tx + 1, ty, { ...nxt, obj: "bed2", dye: selDef.bedDye });
       this.take(sel!.id, 1);
       return;
     }
@@ -1043,6 +1162,11 @@ export class Game {
       this.world.set(tx, ty, { ...tile, obj: selDef.place });
       this.take(sel!.id, 1);
     }
+  }
+
+  /** a floor tile fits on bare ground: not on water, tilled farmland, ore, anything already standing there, or another tile */
+  private canLayFloor(tile: Tile): boolean {
+    return !tile.floor && !tile.obj && !tile.ore && tile.t !== "water" && tile.t !== "farmland";
   }
 
   /** torches go on open ground or on a block / wall; never on water, trees, ores, crops, doors, beds or cave mouths */
@@ -1125,7 +1249,7 @@ export class Game {
 
   private mineTarget(
     tile: Tile,
-  ): { kind: "obj" | "ore" | "stone" | "torch"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
+  ): { kind: "obj" | "ore" | "stone" | "torch" | "floor"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
     if (tile.torch) {
       // a torch comes off first; with a torch in hand nothing is mined, so a held key can't undo a placement
       const held = this.slots[this.hotbar];
@@ -1150,13 +1274,24 @@ export class Game {
       }
       // tall grass: nearly instant by hand, and the only wild source of seeds
       if (tile.obj === "tall_grass") return { kind: "obj", rate: 12, drop: { id: "seeds", n: 1 } };
+      // wild flowers: picked almost instantly, each kind gives its own dye
+      const flowerDye = FLOWER_DYE[tile.obj];
+      if (flowerDye) return { kind: "obj", rate: 12, drop: { id: flowerDye, n: 1 } };
       if (tile.obj.startsWith("block_")) {
         const id = BLOCK_DROP[tile.obj] ?? "dirt";
         return { kind: "obj", rate: 1.6, drop: { id, n: 1 } };
       }
-      if (tile.obj === "bed" || tile.obj === "bed2") return { kind: "obj", rate: 1.6, drop: { id: "bed", n: 1 } };
+      if (tile.obj === "bed" || tile.obj === "bed2") return { kind: "obj", rate: 1.6, drop: { id: bedItem(tile.dye), n: 1 } };
       if (tile.obj === "door_closed" || tile.obj === "door_open") return { kind: "obj", rate: 1.6, drop: { id: "door", n: 1 } };
       return null;
+    }
+    if (tile.floor) {
+      // anything that can be placed on the floor (a block, a bed, another tile) is for placing: a held
+      // key must never pick the floor back up instead. Empty hands or any tool lift it.
+      const held = this.slots[this.hotbar];
+      const heldDef = held ? ITEMS[held.id] : undefined;
+      if (heldDef && (heldDef.place || heldDef.floor)) return null;
+      return { kind: "floor", rate: 4, drop: { id: floorItem(tile.floor), n: 1 } };
     }
     if (tile.t === "stone") {
       const tier = this.toolOf("pickaxe");
@@ -1186,14 +1321,19 @@ export class Game {
       this.give("torch", 1);
       return;
     }
+    if (mine.kind === "floor") {
+      this.world.set(tx, ty, { ...tile, floor: undefined });
+      this.give(mine.drop.id, mine.drop.n);
+      return;
+    }
     if (mine.kind === "obj") {
       if (tile.obj === "bed" || tile.obj === "bed2") {
         for (const dx of [-1, 0, 1]) {
           const t2 = this.world.get(tx + dx, ty);
-          if (t2.obj === "bed" || t2.obj === "bed2") this.world.set(tx + dx, ty, { ...t2, obj: undefined, pt: undefined });
+          if (t2.obj === "bed" || t2.obj === "bed2") this.world.set(tx + dx, ty, { ...t2, obj: undefined, pt: undefined, dye: undefined });
         }
       }
-      this.world.set(tx, ty, { ...tile, obj: undefined, pt: undefined });
+      this.world.set(tx, ty, { ...tile, obj: undefined, pt: undefined, dye: undefined });
     } else if (mine.kind === "ore") {
       this.world.set(tx, ty, { ...tile, ore: undefined });
     } else {
@@ -1619,13 +1759,15 @@ export class Game {
     this.say("The Stormcaller calls its swarm!");
   }
 
-  /** the boss smashes whatever stands on a tile (tree, crop, door, placed block, torch); true if something broke */
+  /** the boss smashes whatever stands on a tile (tree, crop, door, placed block, torch); true if something solid broke (flowers go down without counting) */
   private smashTile(tx: number, ty: number): boolean {
     const t = this.world.get(tx, ty);
     const breaks = bossBreaks(t.obj);
     if (!breaks && !t.torch) return false;
     this.world.set(tx, ty, { ...t, obj: breaks ? undefined : t.obj, pt: breaks ? undefined : t.pt, torch: undefined });
-    const tree = t.obj === "tree" || t.obj === "tall_grass" || t.obj?.startsWith("crop");
+    // wild flowers are ground cover: a laser flattens them without being slowed down by them
+    const cover = !!t.obj && t.obj in FLOWER_DYE;
+    const tree = t.obj === "tree" || t.obj === "tall_grass" || cover || t.obj?.startsWith("crop");
     const [a, b] = tree ? ["#3f8a2a", "#8a5a2c"] : ["#8a8a92", "#c9c9d2"];
     for (let i = 0; i < 6; i++) {
       const ang = Math.random() * Math.PI * 2;
@@ -1633,7 +1775,7 @@ export class Game {
       const max = 0.4 + Math.random() * 0.35;
       this.particles.push({ x: tx + 0.5, y: ty + 0.5, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 0.8, life: max, max, size: 3, grow: 0, color: i % 2 ? a : b });
     }
-    return true;
+    return !cover;
   }
 
   /**
@@ -1860,7 +2002,7 @@ export class Game {
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const t = this.world.get(tx, ty);
-        drawGround(c, t.t, t.ore, tx * S - camX, ty * S - camY, S, tx, ty);
+        drawGround(c, t.t, t.ore, tx * S - camX, ty * S - camY, S, tx, ty, t.floor);
       }
     }
 
@@ -1891,12 +2033,12 @@ export class Game {
             draws.push({
               baseY: by,
               fn: () => {
-                drawObject(c, kind, sx, by, S);
+                drawObject(c, kind, sx, by, S, t.dye);
                 drawGhostGlow(c, sx, by, S, warn, this.time);
               },
             });
-          } else if (OBJ_TALL[kind]) draws.push({ baseY: by, fn: () => drawObject(c, kind, sx, by, S) });
-          else drawObject(c, kind, sx, by, S);
+          } else if (OBJ_TALL[kind]) draws.push({ baseY: by, fn: () => drawObject(c, kind, sx, by, S, t.dye) });
+          else drawObject(c, kind, sx, by, S, t.dye);
         }
         if (t.torch) drawTorch(c, sx, by, S, this.time, tx, ty);
       }
