@@ -213,6 +213,10 @@ export interface ItemDef {
   floor?: string;
   /** a sleeping tube painted in this dye colour */
   bedDye?: string;
+  /** a wood block painted in this dye colour */
+  woodDye?: string;
+  /** a hand-held flamethrower: use it on a tile to set it alight */
+  flamer?: boolean;
 }
 
 const HOE_ART = new Set<Tier>(["wood", "stone", "iron", "diamond", "super"]);
@@ -264,6 +268,8 @@ const list: ItemDef[] = [
   // floor tiles: 1 wood makes 4; they go on any ground and blocks can still be placed on top of them
   { id: "tile", name: "Tile", color: "#c99a5b", stack: 64, icon: "tile", floor: "plain" },
   { id: "paint_block", name: "Paint Block", color: "#8a5f27", stack: 64, place: "block_paint", icon: "paint_block" },
+  // a hand-held fire tool: 1 settings block + 1 coal
+  { id: "flamethrower", name: "Flamethrower", color: "#e8742a", stack: 1, icon: "flamethrower", flamer: true },
 ];
 
 // ---------- dyes, flowers and painting ----------
@@ -280,6 +286,7 @@ DYES.forEach((d) => {
   list.push(
     { id: `tile_${d}`, name: `${cap(d)} Tile`, color: DYE_COLOR[d], stack: 64, icon: `tile_${d}`, floor: d },
     { id: `bed_${d}`, name: `${cap(d)} Sleeping Tube`, color: DYE_COLOR[d], stack: 1, place: "bed", icon: `bed_${d}`, bedDye: d },
+    { id: `wood_${d}`, name: `${cap(d)} Wood`, color: DYE_COLOR[d], stack: 64, place: "block_wood", icon: `log_${d}`, woodDye: d },
   );
 });
 
@@ -306,6 +313,11 @@ export function floorItem(floor: string | undefined): string {
   return !floor || floor === "plain" ? "tile" : `tile_${floor}`;
 }
 
+/** the item that places (and drops) a wood block of this colour */
+export function woodItem(dye: string | undefined): string {
+  return dye ? `wood_${dye}` : "wood";
+}
+
 /** the item that places (and drops) a sleeping tube of this colour */
 export function bedItem(dye: string | undefined): string {
   return dye ? `bed_${dye}` : "bed";
@@ -317,21 +329,22 @@ export function dyeOf(id: string | undefined): Dye | undefined {
   return DYES.find((d) => id === `${d}_dye`);
 }
 
-/** which kind of thing a paint block can colour: floor tiles and sleeping tubes */
-export function paintFamily(id: string | undefined): "tile" | "bed" | undefined {
+/** which kind of thing a paint block can colour: floor tiles, sleeping tubes and wood */
+export function paintFamily(id: string | undefined): "tile" | "bed" | "wood" | undefined {
   if (!id) return undefined;
+  if (id === "wood" || DYES.some((d) => id === `wood_${d}`)) return "wood";
   if (id === "tile" || id.startsWith("tile_")) return "tile";
   if (id === "bed" || id.startsWith("bed_")) return "bed";
   return undefined;
 }
 
-/** can this item go into a paint block at all? (a dye, a tile or a sleeping tube) */
+/** can this item go into a paint block at all? (a dye, a tile, a sleeping tube or wood) */
 export function isPaintInput(id: string | undefined): boolean {
   return !!dyeOf(id) || !!paintFamily(id);
 }
 
 /**
- * What a paint block makes from its two input boxes: one dye plus one tile (or sleeping tube),
+ * What a paint block makes from its two input boxes: one dye plus one tile (or sleeping tube, or wood),
  * in either order, gives that tile / tube in the dye's colour. Re-dyeing works too; dyeing
  * something with the colour it already has makes nothing.
  */
@@ -378,6 +391,7 @@ export const RECIPES: Recipe[] = [
   { id: "door", result: "door", count: 1, cat: "Comfort", need: [{ id: "wood", n: 4 }] },
   { id: "tiles", result: "tile", count: 4, cat: "Comfort", need: [{ id: "wood", n: 1 }] },
   { id: "paint_block", result: "paint_block", count: 1, cat: "Comfort", need: [{ id: "settings", n: 3 }, { id: "wood", n: 3 }] },
+  { id: "flamethrower", result: "flamethrower", count: 1, cat: "Tools", need: [{ id: "settings", n: 1 }, { id: "coal", n: 1 }] },
   { id: "torch", result: "torch", count: 4, cat: "Comfort", need: [{ id: "coal", n: 1 }, { id: "stick", n: 1 }] },
   { id: "seeds", result: "seeds", count: 2, cat: "Food", need: [{ id: "wheat", n: 1 }] },
   {
@@ -460,4 +474,29 @@ export function rollSwordPower(rng: () => number = Math.random): SwordPower {
   if (r < SWORD_POWER_ODDS.lightning) return "lightning";
   if (r < SWORD_POWER_ODDS.lightning + SWORD_POWER_ODDS.storm) return "storm";
   return "laser";
+}
+
+// ---------- fire (the flamethrower) ----------
+
+/** how long a flame lasts on each kind of target, in seconds */
+export const FIRE = {
+  /** stone, sand, water, dirt, blocks...: a puff that is gone at once */
+  puff: 0.3,
+  /** open grass: burns on that one tile only, then goes out */
+  grass: 1.6,
+  /** a tree or a wood block: burns for a few seconds, then turns to coal */
+  wood: 3.5,
+  /** a burning wood tile lights the next one this long after it caught */
+  spreadDelay: 1.1,
+  /** wood this close (in tiles, each way) catches: touching, or with a one-tile gap */
+  spreadReach: 2,
+  /** the coal left behind lies on the ground this many seconds (3 minutes) */
+  coalLife: 180,
+  /** the flamethrower fires at most this often */
+  cooldown: 0.45,
+} as const;
+
+/** can this object catch fire and spread it (a tree or a wood block, painted or not)? */
+export function isFlammableObj(obj: ObjKind | undefined): boolean {
+  return obj === "tree" || obj === "block_wood";
 }

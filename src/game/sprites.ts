@@ -225,7 +225,7 @@ function drawOre(c: Ctx, ore: string, x: number, y: number, S: number) {
 /** Tall objects are drawn from their base (bottom of tile). */
 export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: number, dye?: string) {
   // a painted sleeping tube has its own sprite per dye colour
-  const key = kind === "bed" && dye ? `bed_${dye}` : OBJ_SPRITE[kind];
+  const key = kind === "bed" && dye ? `bed_${dye}` : kind === "block_wood" && dye ? `planks_${dye}` : OBJ_SPRITE[kind];
   const img = sprite(key);
   // the tube's sprite already covers both of its tiles: its second half draws nothing of its own
   if (kind === "bed2" && sprite(dye ? `bed_${dye}` : "bed")) return;
@@ -347,7 +347,7 @@ export function drawObject(c: Ctx, kind: ObjKind, x: number, baseY: number, S: n
         block_dirt: ["#8b6039", "#6f4c2c"],
         block_stone: ["#9a9a9a", "#787878"],
         block_sand: ["#e6d9a2", "#c8bb84"],
-        block_wood: ["#8a5f27", "#6d4a1d"],
+        block_wood: dye && FLOOR_PALETTE[dye] ? [FLOOR_PALETTE[dye][0], FLOOR_PALETTE[dye][1]] : ["#8a5f27", "#6d4a1d"],
         block_settings: ["#5a5f66", "#3d4147"],
         block_iron: ["#e6e6e6", "#bdbdbd"],
         block_diamond: ["#7fe9e2", "#41b9b3"],
@@ -648,6 +648,51 @@ export function drawSwarmWarning(c: Ctx, x: number, y: number, r: number, p: num
   for (let i = 0; i < 8; i++) {
     const a = spin + (i * Math.PI) / 4;
     c.fillRect(x + Math.cos(a) * r * 0.82 - 3, y + Math.sin(a) * r * 0.82 - 3, 6, 6);
+  }
+  c.restore();
+}
+
+/** a small item lying on the ground (an icon sprite about half a tile wide, with a little shadow) */
+export function drawGroundItem(c: Ctx, icon: string, x: number, baseY: number, S: number) {
+  const img = sprite(icon);
+  shadow(c, x + S / 2, baseY, S, 0.3);
+  if (img) blit(c, icon, img, x + S * 0.25, baseY - S * 0.1, S, 0.5, false);
+  else px(c, x + S * 0.38, baseY - S * 0.3, S * 0.24, S * 0.2, "#2b2b33");
+}
+
+/**
+ * Fire on one tile, drawn from the tile's bottom edge: flickering tongues of flame. A "puff" is a
+ * small quick flare, a "grass" fire is a low flame, a "wood" fire is tall and fierce and grows
+ * as the wood burns (p goes 0 -> 1 over the burn); every kind dies down at the very end.
+ */
+export function drawFire(c: Ctx, x: number, baseY: number, S: number, kind: "puff" | "grass" | "wood", p: number, time: number, seed: number) {
+  const scale = kind === "wood" ? 0.9 + 0.5 * Math.min(1, p * 1.5) : kind === "grass" ? 0.55 : 0.4;
+  const fade = p > 0.85 ? Math.max(0, (1 - p) / 0.15) : 1;
+  const tongues = kind === "wood" ? 4 : 3;
+  c.save();
+  c.globalAlpha = fade;
+  // glow
+  const gr = S * (kind === "wood" ? 0.9 : 0.55);
+  const g = c.createRadialGradient(x + S / 2, baseY - S * 0.35, 1, x + S / 2, baseY - S * 0.35, gr);
+  g.addColorStop(0, "rgba(255,170,40,0.45)");
+  g.addColorStop(1, "rgba(255,120,20,0)");
+  c.fillStyle = g;
+  c.fillRect(x - S * 0.4, baseY - S * 1.3, S * 1.8, S * 1.8);
+  for (let i = 0; i < tongues; i++) {
+    const fx = x + S * (0.2 + (0.6 * i) / Math.max(1, tongues - 1));
+    const wob = Math.sin(time * 11 + seed + i * 2.1);
+    const h = S * scale * (0.6 + 0.35 * Math.abs(Math.sin(time * 9 + i * 1.7 + seed))) * (i === 0 || i === tongues - 1 ? 0.75 : 1);
+    const w = S * 0.2;
+    const layers: [string, number][] = [["#e8431a", 1], ["#ff9a1f", 0.7], ["#ffe27a", 0.4]];
+    for (const [col, k] of layers) {
+      c.fillStyle = col;
+      c.beginPath();
+      c.moveTo(fx - (w * k) / 1.4, baseY - S * 0.05);
+      c.quadraticCurveTo(fx - (w * k) / 2 + wob * 2, baseY - h * k * 0.6, fx + wob * S * 0.05, baseY - h * k);
+      c.quadraticCurveTo(fx + (w * k) / 2 + wob * 2, baseY - h * k * 0.6, fx + (w * k) / 1.4, baseY - S * 0.05);
+      c.closePath();
+      c.fill();
+    }
   }
   c.restore();
 }

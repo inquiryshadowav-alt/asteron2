@@ -3,6 +3,9 @@ import {
   ITEMS,
   BLOCK_DROP,
   FLOWER_DYE,
+  FIRE,
+  isFlammableObj,
+  woodItem,
   MINE_REQ,
   OBJ_TALL,
   RECIPES,
@@ -57,7 +60,9 @@ import {
   drawBoss,
   drawCharge,
   drawGhostGlow,
+  drawFire,
   drawGround,
+  drawGroundItem,
   drawLightningBolt,
   drawLightningWarning,
   drawMob,
@@ -168,6 +173,28 @@ const MOB_FX: Record<MobKind, [string, string]> = {
 };
 
 /** a square pixel of a visual effect; x / y are in world tiles */
+/** a flame burning on one tile (lit by the flamethrower, or spread from burning wood) */
+interface Fire {
+  tx: number;
+  ty: number;
+  /** seconds burning so far */
+  t: number;
+  dur: number;
+  kind: "puff" | "grass" | "wood";
+  /** a burning tree / wood block has already lit its neighbours */
+  spread: boolean;
+}
+
+/** an item lying on the ground (the coal a burnt tree leaves) until it is picked up or runs out */
+interface GroundItem {
+  x: number;
+  y: number;
+  id: string;
+  n: number;
+  /** seconds left before it disappears */
+  life: number;
+}
+
 interface Particle {
   x: number;
   y: number;
@@ -320,6 +347,9 @@ export class Game {
   arrows: Arrow[] = [];
   booms: { x: number; y: number; t: number }[] = [];
   particles: Particle[] = [];
+  fires: Fire[] = [];
+  groundItems: GroundItem[] = [];
+  private flamerCool = 0;
   private lightCv: HTMLCanvasElement | null = null;
 
   invOpen = false;
@@ -467,6 +497,8 @@ export class Game {
     this.world = new World(this.world.seed, down ? this.underChanges : this.surfaceChanges, layer);
     this.mobs = [];
     this.arrows = [];
+    this.fires = [];
+    this.groundItems = [];
     this.clearBoss();
     this.mining = 0;
     this.miningKey = "";
@@ -565,7 +597,7 @@ export class Game {
     const s = which === "a" ? this.paintA : this.paintB;
     if (this.held) {
       if (!isPaintInput(this.held.id)) {
-        this.say("Only a dye, coal, a tile or a sleeping tube fits here");
+        this.say("Only a dye, coal, a tile, wood or a sleeping tube fits here");
         return;
       }
       const def = ITEMS[this.held.id]!;
@@ -928,6 +960,8 @@ export class Game {
     this.updateArrows(dt);
     this.booms = this.booms.filter((b) => (b.t -= dt) > 0);
     this.updateParticles(dt);
+    this.updateFires(dt);
+    this.updateGroundItems(dt);
 
     if (this.hp <= 0 && !this.dead) {
       this.hp = 0;
@@ -954,6 +988,7 @@ export class Game {
   private useLogic(dt: number) {
     const pressed = this.input.consumeUse();
     const holding = !!this.input.held["use"];
+    if (this.flamerCool > 0) this.flamerCool -= dt;
     const { tx, ty } = this.facing();
     const tile = this.world.get(tx, ty);
     const sel = this.slots[this.hotbar];
@@ -1070,6 +1105,18 @@ export class Game {
       return;
     }
 
+    // flamethrower: fire at the tile in front. Like the torch, this comes before mining, so a
+    // flamethrower in hand never chops or digs; hold the key to keep firing.
+    if (selDef?.flamer) {
+      this.mining = 0;
+      this.miningKey = "";
+      if ((pressed || holding) && this.flamerCool <= 0) {
+        this.flamerCool = FIRE.cooldown;
+        this.fireFlamer(tx, ty);
+      }
+      return;
+    }
+
     // mining (hold)
     // torches: stand one on open ground or mount it on a block / wall. This comes before mining so a
     // torch in hand goes onto a block instead of chipping it away.
@@ -1159,7 +1206,7 @@ export class Game {
         this.say("The Ghost Block hums... something is coming");
         return;
       }
-      this.world.set(tx, ty, { ...tile, obj: selDef.place });
+      this.world.set(tx, ty, { ...tile, obj: selDef.place, dye: selDef.woodDye });
       this.take(sel!.id, 1);
     }
   }
@@ -1234,6 +1281,117 @@ export class Game {
     }
   }
 
+  // ---------- fire ----------
+
+  /** the flamethrower shoots a short burst of flame at a tile; what happens there depends on what is on it */
+  private fireFlamer(tx: number, ty: number) {
+    // a short jet of flame from the player to the target
+    for (let i = 0; i < 7; i++) {
+      const f = (i + 1) / 8;
+      const x = this.x + (tx + 0.5 - this.x) * f;
+      const y = this.y + (ty + 0.5 - this.y) * f;
+      const max = 0.22 + Math.random() * 0.12;
+      this.particles.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 0.8,
+        vy: (Math.random() - 0.5) * 0.8 - 0.4,
+        life: max,
+        max,
+        size: 3 + Math.random() * 2,
+        grow: 2,
+        color: i % 2 ? "#ffb02e" : "#ff6a1a",
+      });
+    }
+    this.igniteTile(tx, ty);
+  }
+
+  /** is this a plant that goes up in a grass fire? */
+  private isPlant(obj: Tile["obj"]): boolean {
+    return obj === "tall_grass" || !!obj?.startsWith("flower_") || !!obj?.startsWith("crop");
+  }
+
+  /**
+   * Set a tile alight. Trees and wood blocks burn for a few seconds and spread; plain grass burns on
+   * that tile only for a moment; anything else (stone, sand, water, dirt, other blocks) only puffs.
+   */
+  private igniteTile(tx: number, ty: number) {
+    if (this.fires.some((f) => f.tx === tx && f.ty === ty)) return;
+    const tile = this.world.get(tx, ty);
+    let kind: Fire["kind"] = "puff";
+    if (isFlammableObj(tile.obj)) kind = "wood";
+    else if (tile.t === "grass" && !tile.floor && (!tile.obj || this.isPlant(tile.obj))) kind = "grass";
+    this.fires.push({ tx, ty, t: 0, dur: FIRE[kind], kind, spread: false });
+  }
+
+  private updateFires(dt: number) {
+    if (!this.fires.length) return;
+    for (const f of [...this.fires]) {
+      f.t += dt;
+      if (f.kind === "wood") {
+        const tile = this.world.get(f.tx, f.ty);
+        if (!isFlammableObj(tile.obj)) {
+          // chopped or broken while it burned: the flame just goes out
+          this.fires = this.fires.filter((o) => o !== f);
+          continue;
+        }
+        // flames reach every tree / wood block touching this one or with a one-tile gap
+        if (!f.spread && f.t >= FIRE.spreadDelay) {
+          f.spread = true;
+          const r = FIRE.spreadReach;
+          for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+              if ((dx || dy) && isFlammableObj(this.world.get(f.tx + dx, f.ty + dy).obj)) this.igniteTile(f.tx + dx, f.ty + dy);
+            }
+          }
+        }
+        // sparks and smoke while it burns
+        if (Math.random() < dt * 14) this.fireSpark(f.tx, f.ty);
+      }
+      if (f.t < f.dur) continue;
+      this.fires = this.fires.filter((o) => o !== f);
+      const tile = this.world.get(f.tx, f.ty);
+      if (f.kind === "wood" && isFlammableObj(tile.obj)) {
+        // burnt down: the tree / block is gone and leaves coal lying there for a few minutes
+        this.world.set(f.tx, f.ty, { ...tile, obj: undefined, pt: undefined, dye: undefined });
+        this.groundItems.push({ x: f.tx + 0.5, y: f.ty + 0.5, id: "coal", n: 1, life: FIRE.coalLife });
+        for (let i = 0; i < 6; i++) this.fireSpark(f.tx, f.ty, true);
+      } else if (f.kind === "grass" && this.isPlant(tile.obj)) {
+        this.world.set(f.tx, f.ty, { ...tile, obj: undefined, pt: undefined });
+      }
+    }
+  }
+
+  private fireSpark(tx: number, ty: number, ash = false) {
+    const max = 0.5 + Math.random() * 0.5;
+    this.particles.push({
+      x: tx + 0.2 + Math.random() * 0.6,
+      y: ty + 0.4 + Math.random() * 0.4,
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: -0.8 - Math.random() * 0.8,
+      life: max,
+      max,
+      size: 2 + Math.random() * 2,
+      grow: ash ? 3 : 1,
+      color: ash ? "#4a4a4f" : Math.random() < 0.5 ? "#ffb02e" : "#ff7a1f",
+    });
+  }
+
+  /** ground items run out after a while, and are picked up by walking over them (as much as fits in the bag) */
+  private updateGroundItems(dt: number) {
+    if (!this.groundItems.length) return;
+    this.groundItems = this.groundItems.filter((g) => {
+      g.life -= dt;
+      if (g.life <= 0) return false;
+      if (Math.hypot(this.x - g.x, this.y - g.y) < 0.75) {
+        const before = this.countOf(g.id);
+        this.give(g.id, g.n);
+        g.n -= this.countOf(g.id) - before;
+      }
+      return g.n > 0;
+    });
+  }
+
   private updateParticles(dt: number) {
     if (!this.particles.length) return;
     const drag = Math.max(0, 1 - 2.2 * dt);
@@ -1278,7 +1436,7 @@ export class Game {
       const flowerDye = FLOWER_DYE[tile.obj];
       if (flowerDye) return { kind: "obj", rate: 12, drop: { id: flowerDye, n: 1 } };
       if (tile.obj.startsWith("block_")) {
-        const id = BLOCK_DROP[tile.obj] ?? "dirt";
+        const id = tile.obj === "block_wood" ? woodItem(tile.dye) : (BLOCK_DROP[tile.obj] ?? "dirt");
         return { kind: "obj", rate: 1.6, drop: { id, n: 1 } };
       }
       if (tile.obj === "bed" || tile.obj === "bed2") return { kind: "obj", rate: 1.6, drop: { id: bedItem(tile.dye), n: 1 } };
@@ -2042,6 +2200,20 @@ export class Game {
         }
         if (t.torch) drawTorch(c, sx, by, S, this.time, tx, ty);
       }
+    }
+    for (const f of this.fires) {
+      const sx = f.tx * S - camX;
+      const by = (f.ty + 1) * S - camY;
+      draws.push({ baseY: by + 1, fn: () => drawFire(c, sx, by, S, f.kind, f.t / f.dur, this.time, f.tx * 7 + f.ty * 13) });
+    }
+    for (const g of this.groundItems) {
+      const sx = g.x * S - camX - S / 2;
+      const by = g.y * S - camY + S * 0.35;
+      const bob = Math.sin(this.time * 4 + g.x * 3) * 2;
+      // blinks while it is about to disappear
+      const blink = g.life < 10 && Math.floor(g.life * 4) % 2 === 0;
+      const icon = ITEMS[g.id]?.icon;
+      draws.push({ baseY: by, fn: () => { if (!blink && icon) drawGroundItem(c, icon, sx, by + bob, S); } });
     }
     for (const m of this.mobs) {
       const sx = m.x * S - camX - S / 2;

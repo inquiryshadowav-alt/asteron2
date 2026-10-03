@@ -70,6 +70,17 @@ import a_tile_white from "./assets/tile_white.png";
 import a_tile_yellow from "./assets/tile_yellow.png";
 import a_white_dye from "./assets/white_dye.png";
 import a_yellow_dye from "./assets/yellow_dye.png";
+import a_log_red from "./assets/log_red.png";
+import a_planks_red from "./assets/planks_red.png";
+import a_log_blue from "./assets/log_blue.png";
+import a_planks_blue from "./assets/planks_blue.png";
+import a_log_white from "./assets/log_white.png";
+import a_planks_white from "./assets/planks_white.png";
+import a_log_yellow from "./assets/log_yellow.png";
+import a_planks_yellow from "./assets/planks_yellow.png";
+import a_log_black from "./assets/log_black.png";
+import a_planks_black from "./assets/planks_black.png";
+import a_flamethrower from "./assets/flamethrower.png";
 
 export const SPRITE_URLS: Record<string, string> = {
   bed: a_bed,
@@ -143,4 +154,15 @@ export const SPRITE_URLS: Record<string, string> = {
   white_dye: a_white_dye,
   yellow_dye: a_yellow_dye,
   zombie: a_zombie,
+  log_red: a_log_red,
+  planks_red: a_planks_red,
+  log_blue: a_log_blue,
+  planks_blue: a_planks_blue,
+  log_white: a_log_white,
+  planks_white: a_planks_white,
+  log_yellow: a_log_yellow,
+  planks_yellow: a_planks_yellow,
+  log_black: a_log_black,
+  planks_black: a_planks_black,
+  flamethrower: a_flamethrower,
 };

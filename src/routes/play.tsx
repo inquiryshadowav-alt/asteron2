@@ -269,7 +269,7 @@ function Play() {
                         >
                           {hud.paint.out && <ItemIcon id={hud.paint.out.id} />}
                         </button>
-                        <span className="paint-hint">A dye + a tile or a sleeping tube</span>
+                        <span className="paint-hint">A dye + a tile, wood or a sleeping tube</span>
                       </div>
                     )}
                   </div>

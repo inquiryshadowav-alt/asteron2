@@ -140,9 +140,35 @@ describe("tiles, dyes and painting", () => {
     expect(paintResult(undefined, undefined)).toBeNull();
   });
 
-  it("only lets dyes, tiles and sleeping tubes into the paint boxes", () => {
-    for (const id of ["red_dye", "tile", "tile_blue", "bed", "bed_white"]) expect(isPaintInput(id), id).toBe(true);
-    for (const id of ["stone", "wood", "paint_block", "iron_pickaxe"]) expect(isPaintInput(id), id).toBe(false);
+  it("only lets dyes, tiles, sleeping tubes and wood into the paint boxes", () => {
+    for (const id of ["red_dye", "tile", "tile_blue", "bed", "bed_white", "wood", "wood_red"]) expect(isPaintInput(id), id).toBe(true);
+    for (const id of ["stone", "paint_block", "iron_pickaxe", "wood_pickaxe", "wood_sword", "flamethrower"]) expect(isPaintInput(id), id).toBe(false);
+  });
+
+  it("paints wood with a dye, in either order, and re-dyes it", () => {
+    expect(paintResult("red_dye", "wood")).toBe("wood_red");
+    expect(paintResult("wood", "blue_dye")).toBe("wood_blue");
+    expect(paintResult("coal", "wood")).toBe("wood_black");
+    expect(paintResult("white_dye", "wood_red")).toBe("wood_white");
+    expect(paintResult("red_dye", "wood_red")).toBeNull();
+    expect(paintResult("red_dye", "wood_pickaxe")).toBeNull();
+  });
+
+  it("gives every painted wood a placeable block and an inventory skin", () => {
+    for (const d of DYES) {
+      const it = ITEMS[`wood_${d}`]!;
+      expect(it.place, d).toBe("block_wood");
+      expect(it.woodDye, d).toBe(d);
+      expect(SPRITE_URLS[it.icon!], `${d} icon`).toBeTruthy();
+      expect(SPRITE_URLS[`planks_${d}`], `${d} block`).toBeTruthy();
+    }
+  });
+
+  it("makes the flamethrower from 1 settings block and 1 coal, with its own icon", () => {
+    const r = RECIPES.find((x) => x.result === "flamethrower")!;
+    expect(r.need).toEqual([{ id: "settings", n: 1 }, { id: "coal", n: 1 }]);
+    expect(ITEMS["flamethrower"]!.flamer).toBe(true);
+    expect(SPRITE_URLS[ITEMS["flamethrower"]!.icon!]).toBeTruthy();
   });
 
   it("maps a colour back to the item that places it", () => {
