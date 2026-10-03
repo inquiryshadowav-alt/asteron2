@@ -269,6 +269,8 @@ const list: ItemDef[] = [
   { id: "tile", name: "Tile", color: "#c99a5b", stack: 64, icon: "tile", floor: "plain" },
   { id: "paint_block", name: "Paint Block", color: "#8a5f27", stack: 64, place: "block_paint", icon: "paint_block" },
   // a hand-held fire tool: 1 settings block + 1 coal
+  // names a creature: hold it near a mob and press [Use]
+  { id: "name_tag", name: "Name Tag", color: "#e2be78", stack: 16, icon: "name_tag" },
   { id: "flamethrower", name: "Flamethrower", color: "#e8742a", stack: 1, icon: "flamethrower", flamer: true },
 ];
 
@@ -391,6 +393,7 @@ export const RECIPES: Recipe[] = [
   { id: "door", result: "door", count: 1, cat: "Comfort", need: [{ id: "wood", n: 4 }] },
   { id: "tiles", result: "tile", count: 4, cat: "Comfort", need: [{ id: "wood", n: 1 }] },
   { id: "paint_block", result: "paint_block", count: 1, cat: "Comfort", need: [{ id: "settings", n: 3 }, { id: "wood", n: 3 }] },
+  { id: "name_tag", result: "name_tag", count: 1, cat: "Tools", need: [{ id: "iron", n: 2 }, { id: "settings", n: 1 }] },
   { id: "flamethrower", result: "flamethrower", count: 1, cat: "Tools", need: [{ id: "settings", n: 1 }, { id: "coal", n: 1 }] },
   { id: "torch", result: "torch", count: 4, cat: "Comfort", need: [{ id: "coal", n: 1 }, { id: "stick", n: 1 }] },
   { id: "seeds", result: "seeds", count: 2, cat: "Food", need: [{ id: "wheat", n: 1 }] },
@@ -504,4 +507,17 @@ export const FIRE = {
 /** can this object catch fire and spread it (a tree, a wood block painted or not, or a wooden door)? */
 export function isFlammableObj(obj: ObjKind | undefined): boolean {
   return obj === "tree" || obj === "block_wood" || obj === "door_closed" || obj === "door_open";
+}
+
+// ---------- name tags ----------
+
+/** the longest name a Name Tag can give */
+export const NAME_MAX = 15;
+/** how close (in tiles) a mob must be for the Name Tag's [Use] button to show */
+export const NAME_REACH = 1.6;
+/** a name tag's text: trimmed, runs of spaces folded, no control characters, at most NAME_MAX characters */
+export function cleanName(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  const t = raw.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return Array.from(t).slice(0, NAME_MAX).join("").trim();
 }

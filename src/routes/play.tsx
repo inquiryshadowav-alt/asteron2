@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Game, type Hud, type Slot } from "@/game/engine";
-import { ITEMS, RECIPES, SWORD_POWER_NAMES, durabilityColor, maxDurability, usesLeft, type RecipeCategory } from "@/game/data";
+import { ITEMS, NAME_MAX, RECIPES, SWORD_POWER_NAMES, durabilityColor, maxDurability, usesLeft, type RecipeCategory } from "@/game/data";
 import { listWorlds, loadSave } from "@/game/world";
 import { SPRITE_URLS } from "@/game/sprite-assets";
 
@@ -173,6 +173,13 @@ function Play() {
             )}
 
             {hud.toast && <div className="toast">{hud.toast}</div>}
+
+            {hud.canName && (
+              <button className="btn primary use-btn" onClick={() => g?.beginNaming()}>
+                Use
+              </button>
+            )}
+            {hud.naming && g && <NameBox maxLen={NAME_MAX} onOk={(n) => g.applyName(n)} onCancel={() => g.cancelNaming()} />}
 
             <div className="hotbar">
               {hud.slots.slice(0, 9).map((s, i) => (
@@ -512,6 +519,39 @@ function Joystick({ onDir }: { onDir: (action: Dir, on: boolean) => void }) {
       onLostPointerCapture={release}
     >
       <div className="joystick-knob" style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }} />
+    </div>
+  );
+}
+
+/** the box a Name Tag opens: type up to NAME_MAX characters, then Name it (Enter) or Cancel (Esc) */
+function NameBox({ maxLen, onOk, onCancel }: { maxLen: number; onOk: (name: string) => boolean; onCancel: () => void }) {
+  const [text, setText] = useState("");
+  return (
+    <div className="name-box" role="dialog" aria-label="Name this creature">
+      <div className="name-title">Name this creature</div>
+      <input
+        className="name-input"
+        autoFocus
+        value={text}
+        maxLength={maxLen}
+        placeholder="Type a name"
+        onChange={(e) => setText(Array.from(e.target.value).slice(0, maxLen).join(""))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onOk(text);
+          else if (e.key === "Escape") onCancel();
+        }}
+      />
+      <div className="name-count">
+        {Array.from(text).length}/{maxLen}
+      </div>
+      <div className="name-actions">
+        <button className="btn small" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn primary small" onClick={() => onOk(text)}>
+          Name it
+        </button>
+      </div>
     </div>
   );
 }

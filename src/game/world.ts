@@ -56,6 +56,8 @@ export interface WorldSave {
   origin?: { x: number; y: number };
   /** which durability table the tools were counted in (see TOOLS_VERSION); older saves get their tools carried over */
   toolsV?: number;
+  /** mobs given a Name Tag: they never despawn, so they are kept with the world (on either layer) */
+  namedMobs?: { kind: string; x: number; y: number; hp: number; name: string; layer: Layer; cave?: boolean }[];
 }
 
 export const key = (x: number, y: number) => x + "," + y;

@@ -4,6 +4,8 @@ import {
   BLOCK_DROP,
   FLOWER_DYE,
   FIRE,
+  NAME_REACH,
+  cleanName,
   isFlammableObj,
   woodItem,
   MINE_REQ,
@@ -108,6 +110,10 @@ export interface Hud {
   boss: { hp: number; max: number } | null;
   /** the paint block's side panel (two input boxes and the result) while one is open, otherwise null */
   paint: { a: Slot | null; b: Slot | null; out: Slot | null } | null;
+  /** a Name Tag is in hand and a mob is close enough to name: shows the [Use] button */
+  canName: boolean;
+  /** the name box is open for a mob */
+  naming: boolean;
 }
 
 type MobKind = "insect" | "hover" | "builder" | "corrupted" | "phantom" | "electric" | "creeper" | "zombie" | "swarmling";
@@ -157,6 +163,8 @@ interface Mob {
   cave: boolean;
   /** made by the Stormcaller: it ignores daylight, is never hurt by the boss, and vanishes when the boss does */
   minion?: boolean;
+  /** given with a Name Tag: shown when the player is near, and the mob never despawns */
+  name?: string;
 }
 
 /** the two colours of the pixel burst when each kind of mob dies */
@@ -350,6 +358,11 @@ export class Game {
   fires: Fire[] = [];
   groundItems: GroundItem[] = [];
   private flamerCool = 0;
+  /** the mob the open name box will name (null when it is closed); the game stands still meanwhile */
+  private nameMob: Mob | null = null;
+  /** named mobs waiting on the layer the player is not on, so they are still there when he comes back */
+  private stashedMobs: Record<Layer, Mob[]> = { surface: [], under: [] };
+  private pendingMobs: Mob[] = [];
   private lightCv: HTMLCanvasElement | null = null;
 
   invOpen = false;
@@ -384,6 +397,17 @@ export class Game {
     this.underChanges = opts.save?.underChanges ?? {};
     const layer: Layer = opts.save?.layer ?? "surface";
     this.world = new World(opts.seed, layer === "under" ? this.underChanges : this.surfaceChanges, layer);
+    for (const m of opts.save?.namedMobs ?? []) {
+      const name = typeof m.name === "string" ? cleanName(m.name) : "";
+      if (!MOBS[m.kind as MobKind] || !name) continue;
+      const mob: Mob = {
+        kind: m.kind as MobKind, x: m.x, y: m.y, hp: Math.max(1, m.hp), vx: 0, vy: 0, wander: 0, flee: 0, cool: 0, fuse: 0,
+        flash: false, hurt: 0, bob: Math.random() * 6.28, cave: !!m.cave, name,
+      };
+      this.stashedMobs[m.layer === "under" ? "under" : "surface"].push(mob);
+    }
+    this.mobs = this.stashedMobs[layer];
+    this.stashedMobs[layer] = [];
 
     if (opts.save) {
       this.x = opts.save.player.x;
@@ -469,6 +493,29 @@ export class Game {
     };
   }
 
+  /** every named mob, on both layers, for the save file */
+  private namedMobsForSave(): NonNullable<WorldSave["namedMobs"]> {
+    const out: NonNullable<WorldSave["namedMobs"]> = [];
+    const here = this.world.layer;
+    const other: Layer = here === "under" ? "surface" : "under";
+    const add = (list: Mob[], layer: Layer) => {
+      for (const m of list) if (m.name) out.push({ kind: m.kind, x: m.x, y: m.y, hp: m.hp, name: m.name, layer, cave: m.cave });
+    };
+    add(this.mobs, here);
+    add(this.stashedMobs[other], other);
+    return out;
+  }
+
+  /** moving to another layer (a cave, or a respawn): named mobs wait where they are, everything else is dropped.
+   *  Call before swapping the world; the new layer's named mobs are left in pendingMobs. */
+  private switchMobs(to: Layer) {
+    const from = this.world.layer;
+    this.stashedMobs[from] = this.mobs.filter((m) => m.name);
+    this.pendingMobs = this.stashedMobs[to];
+    this.stashedMobs[to] = [];
+    this.mobs = [];
+  }
+
   save() {
     const data: WorldSave = {
       seed: this.world.seed,
@@ -481,6 +528,7 @@ export class Game {
       hotbarIndex: this.hotbar,
       origin: { x: this.originX, y: this.originY },
       toolsV: TOOLS_VERSION,
+      namedMobs: this.namedMobsForSave(),
     };
     writeSave(this.saveId, data);
   }
@@ -496,8 +544,9 @@ export class Game {
     if (obj !== "cave_entrance" && obj !== "cave_exit") return;
     const down = obj === "cave_entrance";
     const layer: Layer = down ? "under" : "surface";
+    this.switchMobs(layer);
     this.world = new World(this.world.seed, down ? this.underChanges : this.surfaceChanges, layer);
-    this.mobs = [];
+    this.mobs = this.pendingMobs;
     this.arrows = [];
     this.fires = [];
     this.groundItems = [];
@@ -685,6 +734,8 @@ export class Game {
       pos: this.coords(),
       xp: this.countOf("xp"),
       boss: this.boss ? { hp: this.boss.hp, max: this.boss.max } : null,
+      canName: !this.nameMob && !!this.nameCandidate(),
+      naming: !!this.nameMob,
       paint: this.paintOpen ? { a: this.paintA ? { ...this.paintA } : null, b: this.paintB ? { ...this.paintB } : null, out: this.paintOutput() } : null,
     });
   }
@@ -899,7 +950,7 @@ export class Game {
       if (this.sleeping <= 0) {
         // night is the second half of a day, so sleeping always wakes up in the next day's morning
         this.time = (Math.floor(this.time / DAY_LEN) + 1) * DAY_LEN + MORNING;
-        this.mobs = this.mobs.filter((m) => !MOBS[m.kind].hostile);
+        this.mobs = this.mobs.filter((m) => m.name || !MOBS[m.kind].hostile);
         this.ghostSeen.clear(); // the clock jumped ahead: a Ghost Block must not fire for every pulse slept through
         this.say("Good morning!");
       }
@@ -907,7 +958,7 @@ export class Game {
       return;
     }
 
-    if (this.paused || this.invOpen || this.dead) {
+    if (this.paused || this.invOpen || this.dead || this.nameMob) {
       this.input.consumeUse();
       return;
     }
@@ -1005,6 +1056,9 @@ export class Game {
     const tile = this.world.get(tx, ty);
     const sel = this.slots[this.hotbar];
     const selDef = sel ? ITEMS[sel.id] : undefined;
+
+    // a Name Tag in hand next to a mob: Use / Space / Enter / A opens the name box instead of hitting it
+    if (pressed && selDef?.id === "name_tag" && this.beginNaming()) return;
 
     // attack a mob in front
     const target = this.mobs.find((m) => Math.abs(m.x - (tx + 0.5)) < 0.8 && Math.abs(m.y - (ty + 0.5)) < 0.8);
@@ -1291,6 +1345,88 @@ export class Game {
     }
   }
 
+  // ---------- name tag ----------
+
+  /** the nearest mob a Name Tag in hand could name: very close, and not a Stormcaller minion */
+  private nameCandidate(): Mob | null {
+    const s = this.slots[this.hotbar];
+    if (!s || s.id !== "name_tag" || this.dead || this.paused) return null;
+    let best: Mob | null = null;
+    let bd = NAME_REACH;
+    for (const m of this.mobs) {
+      if (m.minion || m.hp <= 0) continue;
+      const d = Math.hypot(m.x - this.x, m.y - this.y);
+      if (d <= bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  /** the [Use] button: opens the name box for the closest mob; false when there is none in reach */
+  beginNaming(): boolean {
+    if (this.nameMob) return true;
+    const m = this.nameCandidate();
+    if (!m) return false;
+    this.nameMob = m;
+    this.input.clear();
+    this.emit();
+    return true;
+  }
+
+  cancelNaming() {
+    if (!this.nameMob) return;
+    this.nameMob = null;
+    this.emit();
+  }
+
+  /** give the mob the typed name (at most 15 characters) and use up the tag */
+  applyName(raw: string): boolean {
+    const m = this.nameMob;
+    if (!m) return false;
+    const name = cleanName(raw);
+    if (!name) {
+      this.say("Type a name first");
+      return false;
+    }
+    this.nameMob = null;
+    if (!this.mobs.includes(m)) {
+      this.say("It got away");
+      return false;
+    }
+    m.name = name;
+    this.take("name_tag", 1);
+    this.say(`Named it ${name}`);
+    this.save();
+    return true;
+  }
+
+  /** names float above named mobs when the player is near; drawn above the night so they stay readable */
+  private drawNames(c: CanvasRenderingContext2D, S: number, camX: number, camY: number) {
+    const FAR = 6;
+    const NEAR = 3.5;
+    c.save();
+    c.textAlign = "center";
+    c.textBaseline = "alphabetic";
+    c.font = `bold ${Math.max(11, Math.round(S * 0.36))}px system-ui, sans-serif`;
+    for (const m of this.mobs) {
+      if (!m.name) continue;
+      const d = Math.hypot(m.x - this.x, m.y - this.y);
+      if (d > FAR) continue;
+      const a = d <= NEAR ? 1 : 1 - (d - NEAR) / (FAR - NEAR);
+      const sx = m.x * S - camX;
+      const sy = m.y * S - camY - S * 0.95;
+      const w = c.measureText(m.name).width + 10;
+      c.globalAlpha = a;
+      c.fillStyle = "rgba(0,0,0,0.55)";
+      c.fillRect(Math.round(sx - w / 2), Math.round(sy - S * 0.34), Math.round(w), Math.round(S * 0.44));
+      c.fillStyle = "#ffffff";
+      c.fillText(m.name, sx, sy);
+    }
+    c.restore();
+  }
+
   // ---------- fire ----------
 
   /** one shot of the flamethrower at a tile: uses one charge, and the tool is spent after its last */
@@ -1546,8 +1682,8 @@ export class Game {
 
   private trySpawn() {
     const night = this.isNight() || this.inCave();
-    const hostile = this.mobs.filter((m) => MOBS[m.kind].hostile && !m.minion).length;
-    const passive = this.mobs.filter((m) => !MOBS[m.kind].hostile).length;
+    const hostile = this.mobs.filter((m) => MOBS[m.kind].hostile && !m.minion && !m.name).length;
+    const passive = this.mobs.filter((m) => !MOBS[m.kind].hostile && !m.name).length;
     const maxHostile = night ? (this.difficulty === "hard" ? 12 : 6) : 0;
     const maxPassive = 8;
     const kinds: MobKind[] = night
@@ -1666,10 +1802,10 @@ export class Game {
     if (!this.isNight()) {
       // cave dwellers survive daylight — their cave stays dark all day
       this.mobs = this.mobs.filter(
-        (m) => m.minion || !MOBS[m.kind].hostile || m.cave || this.inCave(m.x, m.y) || Math.hypot(m.x - this.x, m.y - this.y) < 6,
+        (m) => m.minion || m.name || !MOBS[m.kind].hostile || m.cave || this.inCave(m.x, m.y) || Math.hypot(m.x - this.x, m.y - this.y) < 6,
       );
     }
-    this.mobs = this.mobs.filter((m) => Math.hypot(m.x - this.x, m.y - this.y) < 40);
+    this.mobs = this.mobs.filter((m) => m.name || Math.hypot(m.x - this.x, m.y - this.y) < 40);
   }
 
   // ---------- Ghost Block + Stormcaller ----------
@@ -2147,6 +2283,7 @@ export class Game {
 
   respawn() {
     const spot = this.respawnSpot();
+    this.switchMobs(spot.layer);
     if (this.world.layer !== spot.layer) {
       const changes = spot.layer === "under" ? this.underChanges : this.surfaceChanges;
       this.world = new World(this.world.seed, changes, spot.layer);
@@ -2157,7 +2294,7 @@ export class Game {
     this.hunger = MAX_HUNGER;
     this.dead = false;
     this.hurtFlash = 0;
-    this.mobs = [];
+    this.mobs = this.pendingMobs;
     this.arrows = [];
     this.clearBoss();
     this.ghostSeen.clear();
@@ -2302,6 +2439,7 @@ export class Game {
     if (dark > 0 || cave || fog) this.drawDarkness(c, W, H, S, camX, camY, dark, cave, 3.4, fog);
     // Super Sword abilities: above night, cave and boss darkness, so the bolt is never dimmed or cut off
     this.drawCastEffects(c, S, camX, camY, true);
+    this.drawNames(c, S, camX, camY);
 
     if (this.hurtFlash > 0) {
       const a = Math.min(0.55, this.hurtFlash);

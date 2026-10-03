@@ -80,6 +80,7 @@ import a_log_yellow from "./assets/log_yellow.png";
 import a_planks_yellow from "./assets/planks_yellow.png";
 import a_log_black from "./assets/log_black.png";
 import a_planks_black from "./assets/planks_black.png";
+import a_name_tag from "./assets/name_tag.png";
 import a_flamethrower from "./assets/flamethrower.png";
 
 export const SPRITE_URLS: Record<string, string> = {
@@ -165,4 +166,5 @@ export const SPRITE_URLS: Record<string, string> = {
   log_black: a_log_black,
   planks_black: a_planks_black,
   flamethrower: a_flamethrower,
+  name_tag: a_name_tag,
 };

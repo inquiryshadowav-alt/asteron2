@@ -464,3 +464,22 @@
   .cell { width: 32px; height: 32px; }
   .grid { grid-template-columns: repeat(6, 1fr); }
 }
+
+/* Name Tag: the [Use] button above the hotbar, and the name box */
+.use-btn {
+  position: absolute; left: 50%; bottom: calc(max(8px, env(safe-area-inset-bottom, 0px)) + 56px);
+  transform: translateX(-50%); z-index: 5; min-width: 84px; padding: 8px 18px; font-size: 14px;
+}
+.name-box {
+  position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); z-index: 20;
+  display: flex; flex-direction: column; gap: 8px; width: min(320px, calc(100vw - 24px));
+  background: #14181fee; border: 3px solid var(--bc-edge); padding: 14px; color: var(--bc-text);
+}
+.name-title { font-size: 14px; text-align: center; }
+.name-input {
+  background: #0b0e13; border: 2px solid var(--bc-edge); color: #fff; padding: 8px; font-size: 16px; width: 100%;
+  font-family: inherit; box-sizing: border-box;
+}
+.name-input:focus { outline: 2px solid #fff; }
+.name-count { font-size: 11px; color: var(--bc-muted); text-align: right; }
+.name-actions { display: flex; gap: 8px; justify-content: flex-end; }

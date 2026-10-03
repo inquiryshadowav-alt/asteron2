@@ -32,7 +32,14 @@ export class InputMap {
   onPause: (() => void) | null = null;
   onInventory: (() => void) | null = null;
 
+  /** typing in a text box (the Name Tag's name field) must not walk, use or pause the game */
+  private static typing(e: KeyboardEvent): boolean {
+    const tag = (e.target as { tagName?: string } | null)?.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA";
+  }
+
   private down = (e: KeyboardEvent) => {
+    if (InputMap.typing(e)) return;
     // leave browser shortcuts (Ctrl+S, Ctrl+D, Cmd+W ...) alone instead of swallowing them
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const r = resolveAction(e);
@@ -63,6 +70,7 @@ export class InputMap {
   };
 
   private up = (e: KeyboardEvent) => {
+    if (InputMap.typing(e)) return;
     const r = resolveAction(e);
     if (!r || r.slot) return;
     this.held[r.action] = false;
