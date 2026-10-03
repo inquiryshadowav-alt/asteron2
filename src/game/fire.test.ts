@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Game } from "./engine";
-import { FIRE } from "./data";
+import { FIRE, FLAMER_USES, maxDurability } from "./data";
 
 function makeCanvas() {
   return {
@@ -203,5 +203,87 @@ describe("painted wood", () => {
     expect(g.held).toEqual({ id: "wood_blue", n: 1 });
     expect(g.paintA).toEqual({ id: "blue_dye", n: 1 });
     expect(g.paintB).toEqual({ id: "wood", n: 2 });
+  });
+});
+
+describe("fire: diagonals, doors, durability and clicking", () => {
+  it("spreads diagonally, touching or across a one-tile gap, but not further", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", obj: "tree" }); // lit
+    g.world.set(7, 6, { t: "grass", obj: "tree" }); // diagonal, touching
+    g.world.set(9, 8, { t: "grass", obj: "block_wood" }); // diagonal from (7,6) with a one-tile gap
+    g.world.set(12, 11, { t: "grass", obj: "tree" }); // diagonal, two tiles of gap: safe
+    shoot(g);
+    burn(g, 15);
+    for (const [x, y] of [[6, 5], [7, 6], [9, 8]] as const) expect(g.world.get(x, y).obj, `${x},${y}`).toBeUndefined();
+    expect(g.world.get(12, 11).obj).toBe("tree");
+    expect(g.groundItems).toHaveLength(3);
+  });
+
+  it("burns doors, open or closed, and lets fire pass through them", () => {
+    const g = makeGame();
+    g.world.set(6, 5, { t: "grass", obj: "door_closed" });
+    g.world.set(7, 5, { t: "grass", obj: "tree" });
+    g.world.set(8, 6, { t: "grass", obj: "door_open" });
+    shoot(g);
+    // the door must burn, not swing open
+    expect(g.world.get(6, 5).obj).toBe("door_closed");
+    expect(g.fires[0]!.kind).toBe("wood");
+    burn(g, 15);
+    for (const [x, y] of [[6, 5], [7, 5], [8, 6]] as const) expect(g.world.get(x, y).obj, `${x},${y}`).toBeUndefined();
+    expect(g.groundItems).toHaveLength(3);
+  });
+
+  it("can be fired 20 times and is then used up", () => {
+    expect(FLAMER_USES).toBe(20);
+    expect(maxDurability("flamethrower")).toBe(20);
+    const g = makeGame();
+    g.give("flamethrower", 1);
+    expect(g.slots[0]).toMatchObject({ id: "flamethrower", dur: 20 });
+    g.world.set(6, 5, { t: "stone" });
+    for (let i = 0; i < 20; i++) {
+      expect(g.slots[0]?.id, `shot ${i + 1}`).toBe("flamethrower");
+      priv(g).flamerCool = 0;
+      g.fires = [];
+      priv(g).input.pressedUse = true;
+      priv(g).useLogic(0.016);
+    }
+    expect(g.slots[0]).toBeNull();
+    expect(g.countPublic("flamethrower")).toBe(0);
+  });
+
+  it("does not spend a charge on a tile that is already burning, or while holding the key", () => {
+    const g = makeGame();
+    g.give("flamethrower", 1);
+    g.world.set(6, 5, { t: "stone" });
+    priv(g).input.pressedUse = true;
+    priv(g).input.held["use"] = true;
+    priv(g).useLogic(0.016);
+    for (let i = 0; i < 30; i++) priv(g).useLogic(0.1); // key held down
+    expect(g.slots[0]!.dur).toBe(19);
+    priv(g).flamerCool = 0;
+    priv(g).input.pressedUse = true;
+    priv(g).useLogic(0.016); // the puff on that tile has not ended yet: ignored
+    expect(g.slots[0]!.dur).toBe(19);
+  });
+
+  it("fires on a mouse click / tap too: turns towards it and shoots the tile in front", () => {
+    const g = makeGame();
+    g.give("flamethrower", 1);
+    g.world.set(5, 4, { t: "grass", obj: "tree" }); // above the player
+    g.dir = "right";
+    // click above the player (screen centre is the player)
+    priv(g).onPointer({ clientX: 320, clientY: 240 - 40 });
+    expect(g.dir).toBe("up");
+    expect(g.fires).toHaveLength(1);
+    expect(g.fires[0]).toMatchObject({ tx: 5, ty: 4, kind: "wood" });
+    expect(g.slots[0]!.dur).toBe(19);
+  });
+
+  it("keeps its remaining charges across a save", () => {
+    const g = makeGame();
+    g.slots[0] = { id: "flamethrower", n: 1, dur: 7 };
+    expect(priv(g).restoreSlot({ id: "flamethrower", n: 1, dur: 7 })).toMatchObject({ dur: 7 });
+    expect(priv(g).restoreSlot({ id: "flamethrower", n: 1 })).toMatchObject({ dur: 20 });
   });
 });

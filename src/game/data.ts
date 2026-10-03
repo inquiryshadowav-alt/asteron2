@@ -433,9 +433,14 @@ export const OLD_TOOL_USES: Record<number, Record<Tier, number>> = {
   4: { wood: 22, stone: 33, iron: 47, diamond: 60, super: 100 },
 };
 
-/** max durability of an item, or undefined when it isn't a tool */
+/** how many times a flamethrower can be fired before it is spent */
+export const FLAMER_USES = 20;
+
+/** max durability of an item, or undefined when it has none (tools and the flamethrower have it) */
 export function maxDurability(id: string): number | undefined {
-  const t = ITEMS[id]?.tool;
+  const def = ITEMS[id];
+  if (def?.flamer) return FLAMER_USES;
+  const t = def?.tool;
   return t ? TOOL_USES[t.tier] : undefined;
 }
 
@@ -496,7 +501,7 @@ export const FIRE = {
   cooldown: 0.45,
 } as const;
 
-/** can this object catch fire and spread it (a tree or a wood block, painted or not)? */
+/** can this object catch fire and spread it (a tree, a wood block painted or not, or a wooden door)? */
 export function isFlammableObj(obj: ObjKind | undefined): boolean {
-  return obj === "tree" || obj === "block_wood";
+  return obj === "tree" || obj === "block_wood" || obj === "door_closed" || obj === "door_open";
 }

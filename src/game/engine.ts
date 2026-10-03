@@ -444,7 +444,9 @@ export class Game {
     const slot: Slot = { id: s.id, n: s.n };
     const max = maxDurability(s.id);
     const tier = ITEMS[s.id]?.tool?.tier;
-    if (max !== undefined && tier) {
+    if (max !== undefined && ITEMS[s.id]?.flamer) {
+      slot.dur = Math.max(1, Math.min(typeof s.dur === "number" ? s.dur : max, max));
+    } else if (max !== undefined && tier) {
       let dur = typeof s.dur === "number" && s.dur > 0 ? s.dur : max;
       const old = fromVersion < TOOLS_VERSION ? OLD_TOOL_USES[fromVersion] : undefined;
       if (old && tier === "super" && typeof s.dur === "number") {
@@ -528,6 +530,16 @@ export class Game {
     const tx = Math.floor((px + this.x * S - W / 2) / S);
     const ty = Math.floor((py + this.y * S - H / 2) / S);
     const obj = this.world.get(tx, ty).obj;
+    // a mouse click / tap with the flamethrower in hand turns towards the click and fires at the selected tile in front
+    const held = this.slots[this.hotbar];
+    if (held && ITEMS[held.id]?.flamer && obj !== "cave_entrance" && obj !== "cave_exit") {
+      const dx = tx + 0.5 - this.x;
+      const dy = ty + 0.5 - this.y;
+      this.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+      const f = this.facing();
+      this.shootFlamer(f.tx, f.ty);
+      return;
+    }
     if (obj !== "cave_entrance" && obj !== "cave_exit") return;
     if (Math.hypot(tx + 0.5 - this.x, ty + 0.5 - this.y) > PORTAL_REACH) {
       this.say("Get closer to the cave");
@@ -1065,6 +1077,16 @@ export class Game {
       }
     }
 
+    // flamethrower: fire at the tile in front. It comes before doors and mining, so a flamethrower
+    // in hand sets a door alight instead of opening it, and never chops or digs.
+    if (selDef?.flamer) {
+      this.mining = 0;
+      this.miningKey = "";
+      // one shot per press (Space / Enter / A / tap): holding the key never burns through the charges
+      if (pressed) this.shootFlamer(tx, ty);
+      return;
+    }
+
     // open / close a door
     if (pressed && (tile.obj === "door_closed" || tile.obj === "door_open")) {
       const open = tile.obj === "door_closed";
@@ -1102,18 +1124,6 @@ export class Game {
       }
       this.mining = 0;
       this.miningKey = "";
-      return;
-    }
-
-    // flamethrower: fire at the tile in front. Like the torch, this comes before mining, so a
-    // flamethrower in hand never chops or digs; hold the key to keep firing.
-    if (selDef?.flamer) {
-      this.mining = 0;
-      this.miningKey = "";
-      if ((pressed || holding) && this.flamerCool <= 0) {
-        this.flamerCool = FIRE.cooldown;
-        this.fireFlamer(tx, ty);
-      }
       return;
     }
 
@@ -1282,6 +1292,23 @@ export class Game {
   }
 
   // ---------- fire ----------
+
+  /** one shot of the flamethrower at a tile: uses one charge, and the tool is spent after its last */
+  private shootFlamer(tx: number, ty: number) {
+    if (this.flamerCool > 0) return;
+    const s = this.slots[this.hotbar];
+    if (!s || !ITEMS[s.id]?.flamer) return;
+    // a tile that is already burning is ignored, so no charge is wasted on it
+    if (this.fires.some((f) => f.tx === tx && f.ty === ty)) return;
+    this.flamerCool = FIRE.cooldown;
+    this.fireFlamer(tx, ty);
+    s.dur = (s.dur ?? maxDurability(s.id) ?? 1) - 1;
+    if (s.dur <= 0) {
+      this.slots[this.hotbar] = null;
+      this.say("Your Flamethrower ran out of fuel!");
+    }
+    this.emit();
+  }
 
   /** the flamethrower shoots a short burst of flame at a tile; what happens there depends on what is on it */
   private fireFlamer(tx: number, ty: number) {
