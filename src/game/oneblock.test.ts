@@ -85,4 +85,26 @@ describe("One Block play", () => {
     priv(g).update(0.016);
     expect(g.hp).toBeLessThanOrEqual(0);
   });
+
+  it("dying in One Block wipes the inventory, and it stays wiped after respawning", () => {
+    const g = oneBlockGame();
+    g.give("wood", 10);
+    g.give("dirt", 5);
+    g.x = 5.5; g.y = 5.5; // off the edge
+    priv(g).update(0.016);
+    expect(g.dead).toBe(true);
+    expect(g.slots.every((s) => s === null)).toBe(true);
+    g.respawn();
+    expect(g.slots.every((s) => s === null)).toBe(true);
+  });
+
+  it("dying in Survival keeps the inventory", () => {
+    const canvas = { getContext: () => ({}), width: 640, height: 480, getBoundingClientRect: () => ({ left: 0, top: 0, width: 640, height: 480 }) } as unknown as HTMLCanvasElement;
+    const g = new Game(canvas, { saveId: "sv", seed: 5, difficulty: "easy", save: null });
+    g.give("wood", 10);
+    g.hp = -1;
+    priv(g).update(0.016);
+    expect(g.dead).toBe(true);
+    expect(g.countPublic("wood")).toBeGreaterThanOrEqual(10);
+  });
 });

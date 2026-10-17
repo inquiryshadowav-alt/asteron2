@@ -1053,6 +1053,14 @@ export class Game {
     if (this.hp <= 0 && !this.dead) {
       this.hp = 0;
       this.dead = true;
+      if (this.mode === "oneblock") {
+        // One Block is unforgiving: dying wipes the whole inventory (hotbar, bag, cursor and paint boxes)
+        this.slots = new Array(INV_SIZE).fill(null);
+        this.held = null;
+        this.paintA = null;
+        this.paintB = null;
+        this.paintOpen = false;
+      }
       this.clearBoss(); // the fight resets when the player falls
       this.save();
     }
