@@ -41,9 +41,9 @@
     "@radix-ui/react-toggle": "^1.1.9",
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
-    "@tanstack/react-query": "^5.90.2",
-    "@tanstack/react-router": "^1.170.33",
-    "@tanstack/react-start": "^1.168.50",
+    "@tanstack/react-query": "5.102.8",
+    "@tanstack/react-router": "1.170.33",
+    "@tanstack/react-start": "1.168.50",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -84,7 +84,24 @@
     "vitest": "^3.2.4"
   },
   "overrides": {
-    "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz"
+    "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz",
+    "@tanstack/history": "1.162.2",
+    "@tanstack/query-core": "5.102.8",
+    "@tanstack/react-start-client": "1.168.31",
+    "@tanstack/react-start-rsc": "0.1.49",
+    "@tanstack/react-start-server": "1.167.38",
+    "@tanstack/react-store": "0.9.3",
+    "@tanstack/router-core": "1.171.28",
+    "@tanstack/router-generator": "1.167.34",
+    "@tanstack/router-plugin": "1.168.36",
+    "@tanstack/router-utils": "1.162.2",
+    "@tanstack/start-client-core": "1.170.28",
+    "@tanstack/start-fn-stubs": "1.162.0",
+    "@tanstack/start-plugin-core": "1.171.40",
+    "@tanstack/start-server-core": "1.169.32",
+    "@tanstack/start-storage-context": "1.167.30",
+    "@tanstack/store": "0.9.3",
+    "@tanstack/virtual-file-routes": "1.162.0"
   },
   "resolutions": {
     "h3-v2": "https://registry.npmjs.org/h3/-/h3-2.0.1-rc.20.tgz"
