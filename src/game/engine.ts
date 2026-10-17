@@ -1602,7 +1602,7 @@ export class Game {
 
   private mineTarget(
     tile: Tile,
-  ): { kind: "obj" | "ore" | "stone" | "torch" | "floor"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
+  ): { kind: "obj" | "ore" | "stone" | "torch" | "floor" | "ground"; rate: number; drop: { id: string; n: number }; tool?: ToolType | undefined } | null {
     if (tile.torch) {
       // a torch comes off first; with a torch in hand nothing is mined, so a held key can't undo a placement
       const held = this.slots[this.hotbar];
@@ -1646,6 +1646,13 @@ export class Game {
       if (heldDef && (heldDef.place || heldDef.floor)) return null;
       return { kind: "floor", rate: 4, drop: { id: floorItem(tile.floor), n: 1 } };
     }
+    if (this.mode === "oneblock" && tile.t !== "water" && tile.t !== "void" && tile.t !== "stone" && tile.t !== "cave") {
+      // One Block: bare ground (grass, dirt, sand, soil) can be broken too. It gives a Dirt block and
+      // leaves void behind. With a block, floor, seed, torch or hoe in hand, use places/tills instead.
+      const hd = this.slots[this.hotbar] ? ITEMS[this.slots[this.hotbar]!.id] : undefined;
+      if (hd && (hd.place || hd.floor || hd.seed || hd.torch || hd.tool?.type === "hoe")) return null;
+      return { kind: "ground", rate: 1.6, drop: { id: "dirt", n: 1 } };
+    }
     if (this.mode === "oneblock" && tile.t === "water") {
       // water can come out of the source block: it can be filled in by hand, giving nothing
       return { kind: "stone", rate: 3, drop: { id: "stone", n: 0 } };
@@ -1688,6 +1695,12 @@ export class Game {
       this.give(mine.drop.id, mine.drop.n);
       return;
     }
+    if (mine.kind === "ground") {
+      this.world.set(tx, ty, { t: "void" });
+      this.give(mine.drop.id, mine.drop.n);
+      if (tx === SRC.x && ty === SRC.y) this.regenSource(); // the source never stays empty
+      return;
+    }
     if (mine.kind === "obj") {
       if (tile.obj === "bed" || tile.obj === "bed2") {
         for (const dx of [-1, 0, 1]) {
@@ -1722,8 +1735,8 @@ export class Game {
       [10, () => ({ t: "grass", obj: flower() })],
       [4, () => ({ t: "grass", obj: "crop3" })], // ripe fruit/wheat
       [5, () => ({ t: "dirt", obj: "tall_grass" })],
-      [4, () => ({ t: "dirt" })],
-      [8, () => ({ t: "sand" })],
+      [4, () => ({ t: "dirt", obj: "block_dirt" })],
+      [8, () => ({ t: "sand", obj: "block_sand" })],
       [10, () => ({ t: "stone" })],
       [8, () => ({ t: "stone", ore: "coal" })],
       [5, () => ({ t: "stone", ore: "iron" })],
@@ -1736,7 +1749,7 @@ export class Game {
       [3, () => ({ t: "grass", obj: "block_dirt" })],
     ];
     let r = rnd() * table.reduce((n, e) => n + e[0], 0);
-    let tile: Tile = { t: "grass" };
+    let tile: Tile = { t: "grass", obj: "tree" }; // never bare ground: the source always has something to break
     for (const [wt, make] of table) {
       if ((r -= wt) < 0) {
         tile = make();
