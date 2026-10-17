@@ -117,6 +117,10 @@ export function drawGround(
     const hy = Math.floor(hash(wx, wy, i * 3 + 2) * 4);
     px(c, x + hx * q, y + hy * q, q, q, pair[1]);
   }
+  if (t === "void") {
+    // a few faint stars so the emptiness reads as a bottomless drop
+    if (hash(wx, wy, 77) > 0.8) px(c, x + Math.floor(hash(wx, wy, 78) * 3) * q + q / 2, y + Math.floor(hash(wx, wy, 79) * 3) * q + q / 2, q / 2, q / 2, "#8d93c9");
+  }
   if (t === "farmland") {
     px(c, x, y + q, S, q / 2, "#7d5730");
     px(c, x, y + 3 * q, S, q / 2, "#7d5730");

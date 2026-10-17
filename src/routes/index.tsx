@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { listWorlds, saveWorldMeta, deleteWorld, type WorldMeta } from "@/game/world";
+import { listWorlds, saveWorldMeta, deleteWorld, type WorldMeta, type WorldMode } from "@/game/world";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -37,6 +37,7 @@ function Home() {
   const [name, setName] = useState("New World");
   const [difficulty, setDifficulty] = useState<"easy" | "hard">("easy");
   const [seedText, setSeedText] = useState("");
+  const [mode, setMode] = useState<WorldMode>("survival");
 
   useEffect(() => setWorlds(listWorlds()), [screen]);
 
@@ -55,6 +56,7 @@ function Home() {
       name: name.trim() || "New World",
       seed,
       difficulty,
+      mode,
       created: Date.now(),
     };
     saveWorldMeta(meta);
@@ -104,6 +106,7 @@ function Home() {
                         <span className="world-name">{w.name}</span>
                         <span className="world-meta">
                           <span className={"badge " + w.difficulty}>{w.difficulty}</span>
+                          <span className="badge">{w.mode === "oneblock" ? "one block" : "survival"}</span>
                           <span className="world-date">{formatDate(w.created)}</span>
                         </span>
                       </span>
@@ -140,6 +143,19 @@ function Home() {
                 onChange={(e) => setSeedText(e.target.value)}
               />
             </label>
+            <div className="row">
+              <button className={"btn grow" + (mode === "survival" ? " primary" : "")} onClick={() => setMode("survival")}>
+                🌍 Survival
+              </button>
+              <button className={"btn grow" + (mode === "oneblock" ? " primary" : "")} onClick={() => setMode("oneblock")}>
+                🧱 One Block
+              </button>
+            </div>
+            <p className="muted">
+              {mode === "survival"
+                ? "The normal world: forests, caves, water and night mobs."
+                : "An empty void with a single block. Break it and something new grows back. Build floors to stand on — step off the edge and you fall."}
+            </p>
             <div className="row">
               <button
                 className={"btn grow" + (difficulty === "easy" ? " primary" : "")}

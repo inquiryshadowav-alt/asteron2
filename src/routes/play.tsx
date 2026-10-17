@@ -81,6 +81,7 @@ function Play() {
         saveId: id,
         seed: save?.seed ?? meta.seed,
         difficulty: meta.difficulty,
+        mode: meta.mode ?? save?.mode ?? "survival",
         save,
       });
     } catch {

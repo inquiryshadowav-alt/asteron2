@@ -2,7 +2,7 @@
 // Pure data — no rendering, no DOM.
 import { GHOST_DIAMOND_COST, GHOST_XP_COST } from "./boss";
 
-export type TileType = "grass" | "dirt" | "sand" | "water" | "stone" | "farmland" | "cave";
+export type TileType = "grass" | "dirt" | "sand" | "water" | "stone" | "farmland" | "cave" | "void";
 export type Ore = "iron" | "diamond" | "coal";
 export type ObjKind =
   | "tree"
@@ -54,6 +54,7 @@ export const TILE_COLORS: Record<TileType, [string, string]> = {
   stone: ["#8a8a8a", "#7c7c7c"],
   farmland: ["#6b4a2a", "#5d4024"],
   cave: ["#4a4a52", "#3e3e46"],
+  void: ["#05060f", "#10132b"],
 };
 
 export const GROUND_SOLID: Record<TileType, boolean> = {
@@ -64,6 +65,7 @@ export const GROUND_SOLID: Record<TileType, boolean> = {
   stone: true,
   farmland: false,
   cave: false,
+  void: false,
 };
 
 /** objects that block movement */

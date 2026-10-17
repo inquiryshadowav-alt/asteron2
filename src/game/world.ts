@@ -43,9 +43,15 @@ export type ChangeMap = Record<string, Tile>;
 
 export type Layer = "surface" | "under";
 
+/** survival = the normal generated world; oneblock = an empty void with a single block that regrows when broken */
+export type WorldMode = "survival" | "oneblock";
+
 export interface WorldSave {
   seed: number;
   difficulty: "easy" | "hard";
+  mode?: WorldMode;
+  /** One Block: how many times the source block has been regenerated (keeps the seeded sequence going) */
+  oneBlockN?: number;
   changes: ChangeMap;
   underChanges?: ChangeMap;
   layer?: Layer;
@@ -104,6 +110,7 @@ interface Anchor {
 export class World {
   seed: number;
   layer: Layer;
+  mode: WorldMode;
   changes: ChangeMap;
   private cache = new Map<string, Tile[]>();
   private anchors = new Map<string, Anchor | null>();
@@ -111,8 +118,9 @@ export class World {
   /** "x,y" of every tile carrying a torch, kept in sync so lighting never scans the whole map */
   readonly torches = new Set<string>();
 
-  constructor(seed: number, changes: ChangeMap = {}, layer: Layer = "surface") {
+  constructor(seed: number, changes: ChangeMap = {}, layer: Layer = "surface", mode: WorldMode = "survival") {
     this.seed = seed;
+    this.mode = mode;
     this.changes = changes;
     this.layer = layer;
     for (const [k, t] of Object.entries(changes)) if (t.torch) this.torches.add(k);
@@ -256,6 +264,12 @@ export class World {
   }
 
   private genChunk(cx: number, cy: number): Tile[] {
+    if (this.mode === "oneblock") {
+      // One Block: everything is void; the few real tiles live in `changes`
+      const empty: Tile[] = new Array(CHUNK * CHUNK);
+      for (let i = 0; i < empty.length; i++) empty[i] = { t: "void" };
+      return empty;
+    }
     const tiles: Tile[] = new Array(CHUNK * CHUNK);
     for (let ty = 0; ty < CHUNK; ty++) {
       for (let tx = 0; tx < CHUNK; tx++) {
@@ -313,7 +327,7 @@ export class World {
     const ov = this.changes[key(x, y)];
     if (ov) {
       // iron and diamond are cave-only: older saves may still hold one in an edited surface tile
-      if ((ov.ore === "iron" || ov.ore === "diamond") && this.layer === "surface") return { ...ov, ore: undefined };
+      if (this.mode !== "oneblock" && (ov.ore === "iron" || ov.ore === "diamond") && this.layer === "surface") return { ...ov, ore: undefined };
       return ov;
     }
     const cx = Math.floor(x / CHUNK);
@@ -329,8 +343,10 @@ export class World {
     else this.torches.delete(k);
   }
 
-  walkable(x: number, y: number): boolean {
+  /** `allowVoid` is only for the player, who may step off the edge (and fall); mobs never walk into the void */
+  walkable(x: number, y: number, allowVoid = false): boolean {
     const t = this.get(x, y);
+    if (t.t === "void") return allowVoid;
     if (GROUND_SOLID[t.t]) return false;
     if (t.obj && OBJ_SOLID[t.obj]) return false;
     return true;
@@ -345,6 +361,7 @@ export interface WorldMeta {
   name: string;
   seed: number;
   difficulty: "easy" | "hard";
+  mode?: WorldMode;
   created: number;
 }
 

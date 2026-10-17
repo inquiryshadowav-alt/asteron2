@@ -56,7 +56,7 @@ import {
 } from "./boss";
 import { playBossSpawn, unlockAudio } from "./audio";
 import { InputMap } from "./input";
-import { World, writeSave, loadBedSpawn, saveBedSpawn, clearBedSpawn, type Layer, type WorldSave } from "./world";
+import { World, writeSave, loadBedSpawn, saveBedSpawn, clearBedSpawn, FLOWER_KINDS, type Layer, type WorldMode, type WorldSave } from "./world";
 import {
   drawBeam,
   drawBoss,
@@ -308,6 +308,9 @@ const CAVE_Z = -1;
 /** how close (in tiles) the player must be to click a cave open */
 const PORTAL_REACH = 2.5;
 
+/** One Block: the tile that regrows (right below the starting tile) */
+const SRC = { x: 0, y: 1 };
+
 export class Game {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -324,6 +327,9 @@ export class Game {
   private originY = 0;
 
   world: World;
+  mode: WorldMode;
+  /** One Block: counter driving the seeded sequence of what the source block turns into */
+  private oneBlockN = 0;
   difficulty: "easy" | "hard";
   saveId: string;
 
@@ -384,7 +390,9 @@ export class Game {
   private surfaceChanges: Record<string, Tile> = {};
   private underChanges: Record<string, Tile> = {};
 
-  constructor(canvas: HTMLCanvasElement, opts: { saveId: string; seed: number; difficulty: "easy" | "hard"; save: WorldSave | null }) {
+  constructor(canvas: HTMLCanvasElement, opts: { saveId: string; seed: number; difficulty: "easy" | "hard"; mode?: WorldMode; save: WorldSave | null }) {
+    this.mode = opts.mode ?? opts.save?.mode ?? "survival";
+    this.oneBlockN = opts.save?.oneBlockN ?? 0;
     this.canvas = canvas;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D not available");
@@ -396,7 +404,7 @@ export class Game {
     this.surfaceChanges = opts.save?.changes ?? {};
     this.underChanges = opts.save?.underChanges ?? {};
     const layer: Layer = opts.save?.layer ?? "surface";
-    this.world = new World(opts.seed, layer === "under" ? this.underChanges : this.surfaceChanges, layer);
+    this.world = new World(opts.seed, layer === "under" ? this.underChanges : this.surfaceChanges, layer, this.mode);
     for (const m of opts.save?.namedMobs ?? []) {
       const name = typeof m.name === "string" ? cleanName(m.name) : "";
       if (!MOBS[m.kind as MobKind] || !name) continue;
@@ -423,6 +431,14 @@ export class Game {
       // worlds saved before coordinates existed have no origin: count from where the player is now
       this.originX = opts.save.origin?.x ?? Math.floor(this.x);
       this.originY = opts.save.origin?.y ?? Math.floor(this.y);
+    } else if (this.mode === "oneblock") {
+      // one grass tile to stand on, and the source block right in front of the player
+      this.x = 0.5;
+      this.y = 0.5;
+      this.originX = 0;
+      this.originY = 0;
+      this.world.set(0, 0, { t: "grass" });
+      this.regenSource();
     } else {
       const spot = this.findSpawn();
       this.x = spot.x;
@@ -520,6 +536,8 @@ export class Game {
     const data: WorldSave = {
       seed: this.world.seed,
       difficulty: this.difficulty,
+      mode: this.mode,
+      oneBlockN: this.oneBlockN,
       changes: this.surfaceChanges,
       underChanges: this.underChanges,
       layer: this.world.layer,
@@ -893,7 +911,7 @@ export class Game {
       [x - h, y + h],
       [x + h, y + h],
     ];
-    return pts.every((p) => this.world.walkable(Math.floor(p[0]!), Math.floor(p[1]!)));
+    return pts.every((p) => this.world.walkable(Math.floor(p[0]!), Math.floor(p[1]!), true));
   }
 
   /** the solid tiles the player's body currently overlaps (non-empty only if a block was placed on them) */
@@ -908,7 +926,7 @@ export class Game {
     ] as const) {
       const tx = Math.floor(px);
       const ty = Math.floor(py);
-      if (!this.world.walkable(tx, ty)) out.add(tx + "," + ty);
+      if (!this.world.walkable(tx, ty, true)) out.add(tx + "," + ty);
     }
     return out;
   }
@@ -1013,6 +1031,12 @@ export class Game {
       const decay = Math.max(0, 1 - 5 * dt);
       this.kx = Math.abs(this.kx * decay) < 0.05 ? 0 : this.kx * decay;
       this.ky = Math.abs(this.ky * decay) < 0.05 ? 0 : this.ky * decay;
+    }
+
+    // One Block: stepping off the edge is fatal
+    if (this.mode === "oneblock" && this.world.get(Math.floor(this.x), Math.floor(this.y)).t === "void") {
+      this.hp = 0;
+      this.say("You fell into the void");
     }
 
     this.useLogic(dt);
@@ -1240,21 +1264,29 @@ export class Game {
     // floor tiles: lay one on any open ground; blocks, beds and torches can still go on top of it
     if (selDef?.floor) {
       if (this.canLayFloor(tile)) {
-        this.world.set(tx, ty, { ...tile, floor: selDef.floor });
+        this.world.set(tx, ty, { ...tile, t: tile.t === "void" ? "dirt" : tile.t, floor: selDef.floor });
         this.take(sel!.id, 1);
       }
       return;
     }
     // place the 2-tile sleeping tube
-    if (pressed && selDef?.place === "bed" && !tile.obj && tile.t !== "water") {
+    if (pressed && selDef?.place === "bed" && !tile.obj && tile.t !== "water" && tile.t !== "void") {
       const nxt = this.world.get(tx + 1, ty);
-      if (nxt.obj || nxt.t === "water") {
+      if (nxt.obj || nxt.t === "water" || nxt.t === "void") {
         this.say("Needs 2 free tiles");
         return;
       }
       this.world.set(tx, ty, { ...tile, obj: "bed", dye: selDef.bedDye });
       this.world.set(tx + 1, ty, { ...nxt, obj: "bed2", dye: selDef.bedDye });
       this.take(sel!.id, 1);
+      return;
+    }
+    // One Block: a block placed on the void becomes floor; further blocks then stand on it as walls
+    if (selDef?.place && tile.t === "void") {
+      if (selDef.place.startsWith("block_") && selDef.place !== "ghost_block") {
+        this.world.set(tx, ty, { t: selDef.place === "block_sand" ? "sand" : "dirt" });
+        this.take(sel!.id, 1);
+      } else this.say("Place a block first to make floor");
       return;
     }
     // place block
@@ -1282,7 +1314,7 @@ export class Game {
 
   /** torches go on open ground or on a block / wall; never on water, trees, ores, crops, doors, beds or cave mouths */
   private canPlaceTorch(tile: Tile): boolean {
-    if (tile.torch || tile.ore || tile.t === "water") return false;
+    if (tile.torch || tile.ore || tile.t === "water" || tile.t === "void") return false;
     return tile.obj === undefined || tile.obj.startsWith("block_");
   }
 
@@ -1614,6 +1646,10 @@ export class Game {
       if (heldDef && (heldDef.place || heldDef.floor)) return null;
       return { kind: "floor", rate: 4, drop: { id: floorItem(tile.floor), n: 1 } };
     }
+    if (this.mode === "oneblock" && tile.t === "water") {
+      // water can come out of the source block: it can be filled in by hand, giving nothing
+      return { kind: "stone", rate: 3, drop: { id: "stone", n: 0 } };
+    }
     if (tile.t === "stone") {
       const tier = this.toolOf("pickaxe");
       const need = tile.ore ? MINE_REQ[tile.ore] : MINE_REQ.stone;
@@ -1623,7 +1659,12 @@ export class Game {
       }
       // ore always needs a proper pickaxe of the right tier; plain stone can still be chipped away
       // slowly with anything else (or bare hands) instead of being flatly impossible
-      if (tile.ore) return null;
+      if (tile.ore) {
+        if (this.mode !== "oneblock") return null;
+        // One Block: anything can be broken, but ore without the right pickaxe gives nothing
+        const wt = this.slots[this.hotbar] ? ITEMS[this.slots[this.hotbar]!.id]?.tool : undefined;
+        return { kind: "ore", rate: tier ? 0.35 + TIER_LEVEL[tier] * 0.3 : WRONG_TOOL_RATE, drop: { id: tile.ore, n: 0 }, tool: tier ? "pickaxe" : wt?.type };
+      }
       const heldFor = this.slots[this.hotbar];
       const wrongTool = heldFor ? ITEMS[heldFor.id]?.tool : undefined;
       return { kind: "stone", rate: WRONG_TOOL_RATE, drop: { id: "stone", n: 1 }, tool: wrongTool?.type };
@@ -1660,8 +1701,100 @@ export class Game {
     } else {
       this.world.set(tx, ty, { ...tile, t: "dirt", ore: undefined });
     }
-    this.give(mine.drop.id, mine.drop.n);
+    if (mine.drop.n > 0) this.give(mine.drop.id, mine.drop.n);
     if (mine.tool) this.wear(mine.tool); // one use per block broken
+    if (this.mode === "oneblock" && tx === SRC.x && ty === SRC.y) this.regenSource();
+  }
+
+  /** One Block: the source block grows back as something new, never anything unbreakable (no Ghost Block, no cave mouth) */
+  private regenSource() {
+    let a = (this.world.seed * 7919 + ++this.oneBlockN * 2654435761) >>> 0;
+    const rnd = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const flower = () => FLOWER_KINDS[Math.floor(rnd() * FLOWER_KINDS.length)]!;
+    const table: [number, () => Tile][] = [
+      [14, () => ({ t: "grass", obj: "tree" })],
+      [10, () => ({ t: "grass", obj: flower() })],
+      [4, () => ({ t: "grass", obj: "crop3" })], // ripe fruit/wheat
+      [5, () => ({ t: "dirt", obj: "tall_grass" })],
+      [4, () => ({ t: "dirt" })],
+      [8, () => ({ t: "sand" })],
+      [10, () => ({ t: "stone" })],
+      [8, () => ({ t: "stone", ore: "coal" })],
+      [5, () => ({ t: "stone", ore: "iron" })],
+      [2, () => ({ t: "stone", ore: "diamond" })],
+      [6, () => ({ t: "stone", obj: "mountain" })],
+      [5, () => ({ t: "water" })],
+      [5, () => ({ t: "grass", obj: "block_wood" })],
+      [3, () => ({ t: "grass", obj: "block_stone" })],
+      [3, () => ({ t: "grass", obj: "block_sand" })],
+      [3, () => ({ t: "grass", obj: "block_dirt" })],
+    ];
+    let r = rnd() * table.reduce((n, e) => n + e[0], 0);
+    let tile: Tile = { t: "grass" };
+    for (const [wt, make] of table) {
+      if ((r -= wt) < 0) {
+        tile = make();
+        break;
+      }
+    }
+    this.world.set(SRC.x, SRC.y, tile);
+    // sometimes a mob shows up beside it as well
+    if (rnd() < 0.15) {
+      const night = this.isNight();
+      const kinds: MobKind[] = night ? ["zombie", "creeper", "corrupted", "electric", "phantom"] : ["insect", "hover", "builder"];
+      const kind = kinds[Math.floor(rnd() * kinds.length)]!;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const mx = SRC.x + dx;
+          const my = SRC.y + dy;
+          if (this.world.walkable(mx, my) && !this.world.get(mx, my).obj && !(Math.floor(this.x) === mx && Math.floor(this.y) === my)) {
+            this.mobs.push(this.newMob(kind, mx + 0.5, my + 0.5));
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  private newMob(kind: MobKind, x: number, y: number): Mob {
+    return { kind, cave: false, x, y, hp: MOBS[kind].hp, vx: 0, vy: 0, wander: 0, flee: 0, cool: 0, fuse: 0, flash: false, hurt: 0, bob: Math.random() * 6.28 };
+  }
+
+  /** One Block: mobs only spawn on real floor, so a bigger floor means more mobs */
+  private trySpawnOneBlock() {
+    const R = 10;
+    const px = Math.floor(this.x);
+    const py = Math.floor(this.y);
+    const spots: { x: number; y: number }[] = [];
+    let floor = 0;
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        const x = px + dx;
+        const y = py + dy;
+        if (!this.world.walkable(x, y)) continue;
+        floor++;
+        if (!this.world.get(x, y).obj && Math.hypot(x + 0.5 - this.x, y + 0.5 - this.y) >= 2.5 && !this.nearTorch(x + 0.5, y + 0.5, TORCH_RADIUS + 1)) spots.push({ x, y });
+      }
+    }
+    if (!spots.length) return;
+    const night = this.isNight();
+    const hostile = this.mobs.filter((m) => MOBS[m.kind].hostile && !m.minion && !m.name).length;
+    const passive = this.mobs.filter((m) => !MOBS[m.kind].hostile && !m.name).length;
+    const maxHostile = night ? Math.min(this.difficulty === "hard" ? 12 : 6, Math.floor(floor / 10)) : 0;
+    const maxPassive = Math.min(8, Math.floor(floor / 8));
+    const kinds: MobKind[] = night
+      ? hostile < maxHostile ? ["corrupted", "phantom", "electric", "creeper", "zombie", "zombie"] : []
+      : passive < maxPassive ? ["insect", "hover", "builder"] : [];
+    if (!kinds.length) return;
+    const kind = kinds[Math.floor(Math.random() * kinds.length)]!;
+    const sp = spots[Math.floor(Math.random() * spots.length)]!;
+    this.mobs.push(this.newMob(kind, sp.x + 0.5, sp.y + 0.5));
   }
 
   private updateCrops() {
@@ -1681,6 +1814,10 @@ export class Game {
 
 
   private trySpawn() {
+    if (this.mode === "oneblock") {
+      this.trySpawnOneBlock();
+      return;
+    }
     const night = this.isNight() || this.inCave();
     const hostile = this.mobs.filter((m) => MOBS[m.kind].hostile && !m.minion && !m.name).length;
     const passive = this.mobs.filter((m) => !MOBS[m.kind].hostile && !m.name).length;
@@ -2273,7 +2410,7 @@ export class Game {
     const bed = loadBedSpawn(this.saveId);
     if (bed) {
       const changes = bed.layer === "under" ? this.underChanges : this.surfaceChanges;
-      const probe = this.world.layer === bed.layer ? this.world : new World(this.world.seed, changes, bed.layer);
+      const probe = this.world.layer === bed.layer ? this.world : new World(this.world.seed, changes, bed.layer, this.mode);
       const obj = probe.get(bed.x, bed.y).obj;
       if (obj === "bed" || obj === "bed2") return { x: bed.x + 0.5, y: bed.y + 0.5, layer: bed.layer };
       clearBedSpawn(this.saveId); // the bed was broken: forget it
@@ -2286,7 +2423,7 @@ export class Game {
     this.switchMobs(spot.layer);
     if (this.world.layer !== spot.layer) {
       const changes = spot.layer === "under" ? this.underChanges : this.surfaceChanges;
-      this.world = new World(this.world.seed, changes, spot.layer);
+      this.world = new World(this.world.seed, changes, spot.layer, this.mode);
     }
     this.x = spot.x;
     this.y = spot.y;
